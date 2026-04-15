@@ -1,4 +1,4 @@
-ATAC-seq Simulator 🧬
+ATAC-seq Simulator 
 
 Ein interaktiver Python-Simulator, der den Unterschied zwischen Einzelzell-Sequenzierung (scATAC-seq) und klassischer Bulk-Sequenzierung visualisiert.
 
