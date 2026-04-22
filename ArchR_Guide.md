@@ -685,3 +685,19 @@ The primary disadvantage of subsetArchRProject() is that it makes copies of the 
 
 For further options, visit: https://www.archrproject.com/bookdown/manipulating-an-archrproject.html
 
+## 22.04.2026 - Question: Plot 
+
+```r
+p <- ggPoint(
+    x = df[,1], 
+    y = df[,2], 
+    colorDensity = TRUE,
+    continuousSet = "sambaNight",
+    xlabel = "Log10 Unique Fragments",
+    ylabel = "TSS Enrichment",
+    xlim = c(log10(500), quantile(df[,1], probs = 0.99)),
+    ylim = c(0, quantile(df[,2], probs = 0.99))
+) + geom_hline(yintercept = 4, lty = "dashed") + geom_vline(xintercept = 3, lty = "dashed")
+
+p
+``` 
