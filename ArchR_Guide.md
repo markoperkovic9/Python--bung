@@ -704,9 +704,30 @@ head(proj$Sample)
 We can access the TSS Enrichment Scores for each cell:
 ```r
 quantile(proj$TSSEnrichment)
+##       0%      25%      50%      75%     100% 
+##  4.10900 13.92550 16.81500 19.93025 41.98000
 ``` 
-* Example for TSS Enrichment Score (Tutorial) 
-![alt text](image-8.png)
+
+
+When we run `quantile(proj$TSSEnrichment)`, we are looking at the statistical "spread" of our data quality. This tells us how consistent the signal is across our entire cell population.
+
+| Quantile         | Score      | Interpretation                                                                                                                                          |
+| :--------------- | :--------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **0% (Min)**     | **4.109**  | **Filter Check:** Confirms every cell in the project successfully passed the minimum QC threshold (TSS > 4).                                            |
+| **25%**          | **13.925** | **Lower Quartile:** Even the lower-performing cells in this dataset have excellent signal-to-noise ratios.                                              |
+| **50% (Median)** | **16.815** | **Core Quality:** This is your primary "Health Metric." A median of ~17 indicates an exceptionally clean library with very high promoter accessibility. |
+| **75%**          | **19.930** | **Upper Quartile:** 25% of your cells have a signal-to-noise ratio of 20:1 or better.                                                                   |
+| **100% (Max)**   | **41.980** | **Upper Limit:** The highest quality single-cell capture in the sample.                                                                                 |
+
+---
+
+#### Why these numbers matter for the Thesis:
+In scATAC-seq, the median TSS enrichment score is the most cited metric for data quality.
+* **TSS < 4:** Generally considered "failing" or background noise.
+* **TSS 4–10:** Standard/Acceptable quality.
+* **TSS > 10:** High-quality data.
+* **TSS ~17 (Our Result):** Represents state-of-the-art library prep with very high biological signal.
+  
 ### 5.3.2 Example 2: Subsetting an ArchRProject by Cells
 
 Subsetting is a powerful feature that allows you to create a new, smaller `ArchRProject` containing only a specific group of cells. This is essential if you want to analyze a single sample in isolation or remove specific clusters.
