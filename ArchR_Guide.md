@@ -775,16 +775,159 @@ It is important to note that some operations will need to be re-run after projec
 
 The primary disadvantage of subsetArchRProject() is that it makes copies of the Arrow files which can be quite large for bigger data sets. Nevertheless, this is the absolute most stable way to subset a project and is the only way that we recommend.
 
-For further options, visit: https://www.archrproject.com/bookdown/manipulating-an-archrproject.html
+### Physical Subsetting with `subsetArchRProject()`
+---
 
-## 22.04.2026 - Question: Plot 
+#### R Implementation Example
+In this example, we identify all cells belonging to the "BMMC" sample and save them as a separate project.
 
 ```r
+# Step 1: Identify the cell indices for the BMMC sample
+idxSample <- BiocGenerics::which(projHeme1$Sample %in% "scATAC_BMMC_R1")
+
+# Step 2: Create the physical subset
+projSubset <- subsetArchRProject(
+  ArchRProj = projHeme1,               # The original project
+  cells = projHeme1$cellNames[idxSample], # Barcodes to keep
+  outputDirectory = "BMMC_Only_Subset",   # New directory on the HPC
+  dropCells = TRUE,                    # Physically remove non-selected cells
+  force = TRUE                         # Overwrite if the folder exists
+)
+
+``` 
+For further options, visit: https://www.archrproject.com/bookdown/manipulating-an-archrproject.html
+
+
+
+
+### Example 3: Adding Data to an ArchRProject
+
+**1) Creating Custom Metadata**
+
+Often, the original sample names (e.g., scATAC_BMMC_R1) are too long for plotting. You can use R functions like `gsub()` to clean them up:
+```r
+### Create "bioNames" by removing "scATAC_" and "_R1"
+bioNames <- gsub("_R2|_R1|scATAC_","", proj$Sample)
+
+### Look at the first few cleaned names
+head(bioNames)
+### Output: [1] "BMMC" "BMMC" "BMMC" ...
+```
+**2) Method A: The $ Accessor (Quick & Dirty)**
+
+If you have a vector that is exactly the same length as the number of cells in your project, you can assign it directly:
+```r
+proj$bioNames <- bioNames
+``` 
+
+**3) Method B: `addCellColData()` (Precise & Robust):**
+   
+This function is more powerful because it allows you to add data to only a subset of cells. ArchR will automatically fill in the missing entries with NA.
+```r
+# Example: Adding data only to the first 10 cells
+proj <- addCellColData(
+  ArchRProj = proj, 
+  data = bioNames[1:10], 
+  cells = proj$cellNames[1:10], 
+  name = "bioNames_Subset"
+)
+```
+
+**4) Verifying the Addition:**
+You can use `getCellColData()` to retrieve specific columns and compare them:
+```r
+# Retrieve both the full and subsetted columns
+metadata_check <- getCellColData(proj, select = c("bioNames", "bioNames_Subset"))
+head(metadata_check)
+```
+**Thesis Tip:** Always create a "Clean_Sample_Name" column early in your workflow. Using short names like "Control" and "Mutant" instead of long file names will make your downstream UMAP legends and heatmaps much more professional and readable.
+
+### Example 4: Obtaining Columns from cellColData
+
+While the `$` accessor is convenient for quick checks, the `getCellColData()` function is the specialized tool for retrieving metadata. It is more flexible because it allows you to select multiple columns at once, perform mathematical operations during retrieval, and always returns a clean `S4 Vectors DataFrame`.
+
+**1) Retrieving a Single Column by Name**
+
+You can easily pull out specific metrics, such as the total unique fragments (`nFrags`), to use in external plotting or statistical tests:
+```r
+### Retrieve a single column
+df <- getCellColData(projHeme1, select = "nFrags")
+
+### View the resulting DataFrame
+head(df)
+### Output: DataFrame with barcodes as row names and "nFrags" as the column.
+```
+**2) Performing Operations "On the Fly"**
+
+One of the most powerful features of `getCellColData()` is the ability to perform calculations directly within the `select` parameter. This avoids creating unnecessary permanent columns in your project:
+```r
+### Perform log10 transformation and basic arithmetic during retrieval
+df <- getCellColData(projHeme1, select = c("log10(nFrags)", "nFrags - 1"))
+
+### View the transformed data
+head(df)
+### Output: A DataFrame with two columns: "log10(nFrags)" and "nFrags - 1"
+```
+
+**3) Selecting Multiple Metrics**
+
+If you need to compare two different quality control metrics (like Sequencing Depth vs. TSS Enrichment), you can request them together in a single vector:
+```r
+### Retrieve multiple QC metrics simultaneously
+qc_metrics <- getCellColData(projHeme1, select = c("nFrags", "TSSEnrichment"))
+
+### Check the summary stats for the retrieved data
+summary(qc_metrics)
+```
+
+**4) Why use `getCellColData()` instead of `$`?**
+   
+Calculations: It supports inline math (e.g., log10, sqrt, addition/subtraction).
+
+Format: It consistently returns a DataFrame object which preserves cell barcodes as row names, ensuring your data never gets un-synced.
+
+Multi-selection: It can handle a list of many columns at once, which is much cleaner than calling proj$Column five separate times.
+
+**Thesis Tip**: When reporting Sequencing Depth in your thesis, it is standard practice to use the log10-transformed fragment count. Instead of permanently cluttering your project with a "log10_nFrags" column, use getCellColData(proj, select = "log10(nFrags)") to generate your plots and tables on the fly. This keeps your ArchRProject file size smaller and your workspace cleaner.
+
+### Example 5: Plotting QC metrics - log10(Unique Fragments) vs TSS enrichment score
+
+**Selecting the Two Most Robust Metrics** 
+
+While `cellColData` contains 15+ columns, these two are considered the most reliable indicators of technical success:
+
+  * **log10(nFrags)**: Represents the number of unique nuclear fragments (sequencing depth). We use the log10 transformation because fragment counts can vary from 1,000 to 100,000; the log scale makes this range linear and easier to visualize.
+
+  * __TSSEnrichment:__ Measures the signal-to-background ratio. Cells with high signal at Transcription Start Sites are "true" cells, while low scores represent random genomic noise.
+
+\
+We use getCellColData() to pull both metrics at once. Notice that we perform the log10 operation directly inside the function call:
+```r
+### Extract depth and signal quality simultaneously
+df <- getCellColData(projHeme1, select = c("log10(nFrags)", "TSSEnrichment"))
+
+### View the first few rows of your new QC dataframe
+head(df)
+```
+__What does the Output tell us?__
+
+The resulting df (DataFrame) links every cell barcode to its specific QC values. This is the raw data used to generate the "cloud" plot seen in Section 5.2.8.
+
+  * __High log10(nFrags) + High TSSEnrichment:__ These are your "Healthy Cells" (Top-Right of the cloud).
+
+  * __Low log10(nFrags):__ These are "Under-sequenced" cells that lack enough data to be analyzed reliably.
+
+  * __Low TSSEnrichment:__ These are "Noisy" cells (background noise or dying cells) that will likely fail to cluster correctly.
+
+  * __Why we do this before Clustering:__ By looking at these metrics together, we can verify if the QC Cutoffs we set during Arrow file creation (e.g., filterTSS = 4 and filterFrags = 1000) were appropriate. If the "cloud" of cells is too close to the dashed lines, it may indicate that we need to be more stringent with our filters to ensure high-quality downstream results.
+
+### Plotting
+```r
 p <- ggPoint(
-    x = df[,1], 
-    y = df[,2], 
-    colorDensity = TRUE,
-    continuousSet = "sambaNight",
+    x = df[,1], # Log10 Unique Fragments
+    y = df[,2], # TSS Enrichment
+    colorDensity = TRUE, # Colors points by how crowded the area is
+    continuousSet = "sambaNight",  # High-contrast color palette
     xlabel = "Log10 Unique Fragments",
     ylabel = "TSS Enrichment",
     xlim = c(log10(500), quantile(df[,1], probs = 0.99)),
@@ -793,3 +936,48 @@ p <- ggPoint(
 
 p
 ``` 
+
+#### Parameter Breakdown: Customizing the QC Plot
+
+The `ggPoint()` function is a highly optimized plotting utility. Understanding its parameters allows you to fine-tune your Quality Control visualizations to ensure they are both mathematically accurate and publication-ready.
+
+#### Detailed Parameter Reference
+
+| Parameter           | Value / Function     | Purpose                                                                                                                                                                       |
+| :------------------ | :------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`x`**             | `df[,1]`             | Maps the **Log10(Unique Fragments)** to the horizontal axis.                                                                                                                  |
+| **`y`**             | `df[,2]`             | Maps the **TSS Enrichment Score** to the vertical axis.                                                                                                                       |
+| **`colorDensity`**  | `TRUE`               | Calculates local point density. This highlights the "core" of your cell population by coloring the most crowded areas differently.                                            |
+| **`continuousSet`** | `"sambaNight"`       | Specifies the color palette. "sambaNight" is a high-contrast theme (dark blue to bright yellow) that makes density variations easy to see.                                    |
+| **`xlim`**          | `c(log10(500), ...)` | Sets the x-axis range. Starting at 500 fragments provides visual context for the 1,000 fragment cutoff.                                                                       |
+| **`ylim`**          | `c(0, ...)`          | Sets the y-axis range. Starting at 0 allows you to see the full "floor" of the signal-to-noise ratio.                                                                         |
+| **`quantile`**      | `probs = 0.99`       | **Outlier Control:** By setting the upper limit to the 99th percentile, ArchR prevents a few extreme "super-cells" from compressing the rest of your data into a tiny corner. |
+
+---
+
+#### The Significance of the "Dashed Lines"
+
+To finalize the plot, we add standard `ggplot2` layers to represent our biological and technical filters:
+
+1. **`geom_hline(yintercept = 4)`**:
+   * **The TSS Filter:** This horizontal dashed line represents the minimum acceptable signal-to-background ratio. Cells below this line are likely background noise (genomic "soup").
+2. **`geom_vline(xintercept = 3)`**:
+   * **The Depth Filter:** Since we are on a log10 scale, $10^3 = 1,000$. This vertical line marks the cutoff for sequencing depth. Cells to the left of this line do not have enough data for confident analysis.
+
+---
+
+### Why the 99th Percentile Matters
+In almost every scATAC-seq run, you will have a few "outlier" droplets with massive fragment counts (e.g., 500,000+ fragments). If your plot scales to accommodate those few dots, your actual cell population (usually between 2,000 and 10,000 fragments) will appear as a microscopic smudge on the far left. 
+
+Using `quantile(df[,1], probs = 0.99)` tells ArchR: *"Ignore the top 1% of extreme values when deciding how wide to make the plot."* This ensures the "orange core" of your data is always front and center.
+
+* **Thesis Tip:** If you notice that your "density core" (the brightest yellow/orange part) is very close to or overlapping with the dashed lines, it is a sign that your filters are too lenient. You may need to increase your TSS threshold to 6 or 8 for your final analysis to ensure you are only looking at the highest-quality nuclei.
+
+![alt text](image-9.png)
+
+To save an editable vectorized version of this plot, we use `plotPDF()`. This saves the plot within the “Plots” sub-directory of our ArchRProject directory (defined by `getOutputDirectory(projHeme1)`).
+
+```r
+plotPDF(p, name = "TSS-vs-Frags.pdf", ArchRProj = projHeme1, addDOC = FALSE)
+## Plotting Ggplot!
+```
