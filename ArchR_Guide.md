@@ -566,6 +566,36 @@ Once created, the `proj object` is a lightweight container for the following:
 
 **Analysis State**: Tracks which matrices have been added (Tile, GeneScore, Peak) and what clustering/UMAP parameters were used.
 
+### Saving an ArchRProject
+
+```r
+### Corrected save function with quotes and proper parameter naming
+saveArchRProject(
+    ArchRProj = projHeme1,
+    outputDirectory = "/usr/people/BZEDVZ/18perkov/ArchR_Tutorial", # Must be in quotes!
+    overwrite = TRUE,
+    load = TRUE,
+    dropCells = FALSE,
+    logFile = createLogFile("saveArchRProject"),
+    threads = 16 # Usually set as an integer
+)
+```
+### Loading an existing ArchRProject
+Once a project has been saved to the HPC disk, you do not need to re-run the Arrow file creation or initial QC. You can simply "point" R to the directory where the project lives.
+
+#### The Implementation
+To load your project, provide the path to the **folder** containing your data. You do not need to point to a specific file; ArchR will automatically look for the `.rds` state file within that folder.
+
+```r
+### Load the project from your specific HPC directory
+projHeme1 <- loadArchRProject(path = "/usr/people/BZEDVZ/18perkov/ArchR_Tutorial")
+
+### Verify the project loaded correctly
+projHeme1
+### Loading an ArchRProject
+```
+
+
 ## 5.2 Inspecting Cell Metadata (cellColData)
 
 The `cellColData` stores all metadata associated with individual cells. This includes the QC metrics generated during Arrow file creation and the scores from doublet inference.
@@ -981,3 +1011,51 @@ To save an editable vectorized version of this plot, we use `plotPDF()`. This sa
 plotPDF(p, name = "TSS-vs-Frags.pdf", ArchRProj = projHeme1, addDOC = FALSE)
 ## Plotting Ggplot!
 ```
+
+# 5.3 Plotting Sample Statistics
+
+Once multiple samples are integrated into an `ArchRProject`, it is vital to compare their quality metrics side-by-side. This ensures that downstream results (like clustering) are driven by biology rather than technical differences between samples.
+
+### 5.3.1 Introduction to `plotGroups()`
+The `plotGroups()` function is the universal tool in ArchR for visualizing distributions across categories. It primarily produces:
+* **Ridge Plots (`ridges`)**: Ideal for comparing the "shape" of distributions across many groups.
+* **Violin Plots (`violin`)**: Ideal for seeing the density and specific percentiles (when paired with boxplots).
+
+---
+
+### 5.3.2 Example 1: Ridge Plots for TSS Enrichment
+
+In this example, we visualize the **TSS Enrichment** distribution for every sample in the project. This allows us to see if the "signal-to-noise" is consistent across our experiment.
+
+#### Code Breakdown
+
+```r
+p1 <- plotGroups(
+    ArchRProj = proj,         # Your project object
+    groupBy = "Sample",       # The metadata column to group by
+    colorBy = "cellColData",  # Tells ArchR the data is in the metadata table
+    name = "TSSEnrichment",   # The specific metric to plot
+    plotAs = "ridges",        # The type of plot
+    baseSize = 10             # Adjusts the global font size for the plot
+)
+```
+The `plotGroups()` function is highly flexible. Below is a breakdown of the key parameters used to customize your sample statistic plots:
+
+| Parameter        | Definition                         | Purpose                                                                                                                 |
+| :--------------- | :--------------------------------- | :---------------------------------------------------------------------------------------------------------------------- |
+| **`ArchRProj`**  | The ArchRProject object.           | Tells the function which project to pull metadata and data from.                                                        |
+| **`groupBy`**    | A string (e.g., `"Sample"`)        | Defines how to categorize the cells on the Y-axis. You can group by samples, clusters, or any custom metadata column.   |
+| **`colorBy`**    | A string (usually `"cellColData"`) | Specifies the "slot" in the ArchRProject where the data is stored. For QC metrics, this is always `cellColData`.        |
+| **`name`**       | A string (e.g., `"TSSEnrichment"`) | The exact name of the column you want to plot. This can also include math like `"log10(nFrags)"`.                       |
+| **`plotAs`**     | `"ridges"` or `"violin"`           | Sets the visual style. **Ridges** show overlapping density curves; **Violin** shows the density "envelope" of the data. |
+| **`baseSize`**   | Numeric (default is often 10-12)   | A global multiplier for text size. Increasing this makes axis labels and titles larger for presentations or posters.    |
+| **`alpha`**      | Numeric (0 to 1)                   | Sets the transparency of the plot. Especially useful for violin plots to see the internal boxplots more clearly.        |
+| **`addBoxPlot`** | Logical (`TRUE`/`FALSE`)           | (Violin only) If `TRUE`, adds a box-and-whisker plot inside the violin to show the median and quartiles.                |
+
+---
+
+### Understanding the Logic
+When you call `plotGroups()`, you are essentially telling ArchR:
+> "Go into my **`ArchRProj`**, look into the **`colorBy`** table, find the column named **`name`**, and group that data by the categories found in **`groupBy`**. Finally, render the results as **`plotAs`**."
+
+* **Thesis Tip:** Consistency is key for your final figures. Once you find a `baseSize` and `alpha` value that looks good in your VS Code preview, use those same values for every ridge and violin plot in your thesis to give your document a cohesive, professional look.
