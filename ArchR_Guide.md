@@ -580,6 +580,9 @@ saveArchRProject(
     threads = 16 # Usually set as an integer
 )
 ```
+__Very important!__ The load parameter determines whether or not the saveArchRProject() function will return the saved ArchRProject object which you would assign to overwrite the original ArchRProject object or provide a new ArchRProject name using <-. This effectively saves and loads the ArchRProject from its new location. If load = FALSE, then this process does NOT update the ArchRProject object that is active in your current R session. Specifically, the object named projHeme1 in the current R session will still point to the original location of the Arrow files, not the copied Arrow files that reside in the specified outputDirectory. You might use this behavior if you were saving your ArchRProject and shutting down your R session so that the project can be reloaded at a later time.
+
+__Also important!__ The term ArchRProject can be confusing to some users because we use this both to refer to the object that is actively loaded within the R environment and to the file that has been saved on disk as part of the saveArchRProject() process. However, it is extremely important to understand that these are not equivalent. Manipulations that you perform on an ArchRProject that is actively loaded within the R environment do not automatically propagate to the on-disk file. You must run the saveArchRProject() function to store those changes.
 ### Loading an existing ArchRProject
 Once a project has been saved to the HPC disk, you do not need to re-run the Arrow file creation or initial QC. You can simply "point" R to the directory where the project lives.
 
@@ -1058,4 +1061,95 @@ The `plotGroups()` function is highly flexible. Below is a breakdown of the key 
 When you call `plotGroups()`, you are essentially telling ArchR:
 > "Go into my **`ArchRProj`**, look into the **`colorBy`** table, find the column named **`name`**, and group that data by the categories found in **`groupBy`**. Finally, render the results as **`plotAs`**."
 
-* **Thesis Tip:** Consistency is key for your final figures. Once you find a `baseSize` and `alpha` value that looks good in your VS Code preview, use those same values for every ridge and violin plot in your thesis to give your document a cohesive, professional look.
+* **Thesis Tip:** Consistency is key for your final figures. Once you find a `baseSize` and `alpha` value that looks good, use those same values for every ridge and violin plot in your thesis to give your document a cohesive, professional look.
+
+### Saving Plots with `plotPDF()`
+
+Unlike standard R saving functions, `plotPDF()` is "Project Aware." It automatically handles the file pathing to keep your HPC workspace organized.
+
+#### 1. How the Path is Determined
+When you run `plotPDF()`, ArchR looks at the `outputDirectory` stored inside your `ArchRProject` object. It then:
+1. Navigates to that directory.
+2. Creates a sub-folder called **"Plots"** (if it doesn't already exist).
+3. Saves your PDF there using the provided `name`.
+
+```r
+# Save multiple plots (p1, p2, p3, p4) into one vectorized PDF
+plotPDF(
+    p1, p2, p3, p4, 
+    name = "QC-Sample-Statistics.pdf", 
+    ArchRProj = projHeme1, 
+    addDOC = FALSE, 
+    width = 4, 
+    height = 4
+)  
+```
+
+## 5.4 Plotting Sample Fragment Size Distributions
+
+The fragment size distribution is a direct reflection of the "beads on a string" structure of your chromatin. High-quality scATAC-seq data should always show a clear periodicity (peaks and valleys) corresponding to nucleosome spacing. Fragment size distributions in ATAC-seq can be quite variable across samples, cell types, and batches. Slight differences like those shown below are common and do not necessarily correlate with differences in data quality.
+
+#### 1. The `plotFragmentSizes()` Function
+ArchR accesses the pre-computed fragment lengths in the Arrow files to visualize these distributions across all samples simultaneously.
+
+```r
+# Generate the fragment size distribution plot
+p1 <- plotFragmentSizes(ArchRProj = projHeme1)
+
+# Display the plot
+p1
+```
+
+#### 2. Parameter Definitions
+
+`ArchRProj` = The project object containing the links to your Arrow files.
+
+`maxSize`	(Optional) = The maximum fragment size to plot. Default is usually 750 bp.
+
+`groupBy`	(Optional) = Allows you to group the distribution by Sample (default) or Cluster.
+
+![alt text](image-11.png)
+
+#### 3. How to Interpret the Plot
+
+  Sub-nucleosomal Peak: The largest peak on the left (<150 bp). Represents open, accessible regions.
+
+  Nucleosomal Periodicity: You should see smaller, diminishing peaks at ~200 bp, ~400 bp, and ~600 bp.
+
+  Quality Check: If your plot is just a flat line or a single smooth "hump" without distinct peaks/valleys, your library likely has poor chromatin structure (potentially due to over-fragmentation or cell death).
+
+    Thesis Tip: Include this plot to demonstrate that your library has the expected nucleosomal periodicity. Even if the heights of the peaks vary slightly between your experimental groups, the presence of the "staircase" proves that the Tn5 enzyme was acting on healthy, protein-bound chromatin rather than naked, degraded DNA.
+
+### 5.4.2 Plotting TSS Enrichment Profiles
+
+The TSS enrichment profile provides a visual "fingerprint" of your library's signal-to-noise ratio. A high-quality profile should show a sharp, symmetric peak at the center of the TSS.
+
+#### 1. The `plotTSSEnrichment()` Function
+This function aggregates the signal across thousands of known transcription start sites to show the average accessibility "landscape" of your samples.
+
+```r
+# Generate the TSS enrichment profile plot
+p2 <- plotTSSEnrichment(ArchRProj = projHeme1)
+
+# Display the plot
+p2
+``` 
+![alt text](image-12.png)
+
+#### 2. Visual Breakdown of the Plot:
+
+* **The Center Peak (Distance = 0):** This represents the **Nucleosome-Free Region (NFR)**. High-quality libraries show a sharp, tall spike here, indicating that the Tn5 enzyme successfully targeted open promoters.
+* **The +1 Nucleosome Shoulder:** The distinct "bump" observed to the right of the central peak (roughly at +150 to +200 bp) is caused by the **+1 nucleosome**. The presence of this shoulder is a strong indicator of biological integrity and high-resolution data.
+* **The Enrichment Score:** The Y-axis represents the fold-enrichment over the background. In this plot, the PBMC sample (green) shows a maximum enrichment of >20, which is considered exceptional.
+
+#### Comparison Across Samples:
+In the provided plot, we see three distinct lines:
+1.  **scATAC_PBMC_R1 (Green)**: Highest signal-to-noise.
+2.  **scATAC_CD34_BMMC_R1 (Blue)**: Intermediate signal.
+3.  **scATAC_BMMC_R1 (Red)**: Lowest signal of the three, though still far above the standard QC threshold of 4.
+
+> **Thesis Tip:** When discussing this plot, emphasize the **symmetry** and the **+1 nucleosome shoulder**. A messy or "jagged" plot usually indicates low cell numbers or high background noise. The smooth, distinct peaks shown here justify the use of these samples for high-resolution regulatory analysis.
+
+# 5.6 Filtering Doublets from an ArchRProject
+
+Doublets occur when two nuclei are captured in a single droplet. In scATAC-seq, these artifacts can lead to "ghost clusters" or false transitions in trajectory analysis. `filterDoublets()` removes these cells based on the scores calculated during the initial QC phase.
