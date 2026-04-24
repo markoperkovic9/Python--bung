@@ -612,6 +612,77 @@ In ArchR, fragment sizes are categorized based on **nucLength**, which is the le
 
 $$\text{NucleosomeRatio} = \frac{nDiFrags + nMultiFrags}{nMonoFrags}$$
 
+### Deep Dive: Understanding cellColData Metrics
+
+The `cellColData` object is the "biopsy report" for every individual cell in your project. These metrics, calculated during Arrow file creation, allow us to distinguish high-quality biological signals from technical noise.
+
+---
+
+### 1. Signal-to-Noise & Purity Metrics
+These metrics measure how well the Tn5 enzyme targeted open, active regions of the genome compared to random background noise.
+
+* **TSSEnrichment**
+    * **Definition:** The ratio of fragments centered at Transcription Start Sites (TSS) vs. the surrounding genomic background.
+    * **Biological Context:** Active promoters are depleted of nucleosomes and are "wide open." A high score (typically > 4) indicates a high-quality cell with a clear signal.
+* **ReadsInTSS**
+    * **Definition:** The raw number of reads falling within a 100 bp window around known TSS coordinates.
+* **ReadsInPromoter & PromoterRatio**
+    * **Definition:** Measures fragments in the broader promoter neighborhood (default: -2000 to +100 bp from TSS).
+    * **Importance:** A high **PromoterRatio** indicates an efficient library prep where sequencing depth was spent on regulatory regions rather than "genomic dark matter."
+
+
+
+---
+
+### 2. Artifact & Background Metrics
+These metrics identify fragments coming from "sticky" or problematic areas of the genome.
+
+* **ReadsInBlacklist & BlacklistRatio**
+    * **Definition:** The count and proportion of fragments falling into the **ENCODE Blacklist** (genomic regions that consistently show high, non-specific background noise).
+    * **Importance:** High ratios suggest the cell may have been dying or the DNA was degraded, leading to "sticky" non-specific noise that can interfere with clustering.
+
+---
+
+### 3. Structural & Fragment Size Metrics
+ATAC-seq leverages the fact that DNA wraps around histones (nucleosomes) in 147 bp increments. Tn5 cuts only in the "linker" DNA between these beads, creating a characteristic "staircase" pattern.
+
+
+
+* **nFrags**
+    * **Definition:** The total unique nuclear fragments recovered. This is your primary measure of **sequencing depth** per cell.
+* **nMonoFrags**
+    * **Definition:** Fragments shorter than two nucleosomes (~147-294 bp). These are usually the most informative "open chromatin" fragments.
+* **nDiFrags & nMultiFrags**
+    * **Definition:** Fragments spanning two or three+ nucleosomes. These represent more compact or "closed" chromatin states.
+* **NucleosomeRatio**
+    * **Formula:** 
+  $$\text{NucleosomeRatio} = \frac{nDiFrags + nMultiFrags}{nMonoFrags}$$
+    * **Importance:** A high ratio indicates poor Tn5 penetration or DNA clumping, while a low ratio indicates high-quality, accessible chromatin.
+
+
+
+---
+
+### 4. The Analysis Gatekeeper
+
+* **PassQC**
+    * **Definition:** A binary flag (**1** for Pass, **0** for Fail).
+    * **Importance:** ArchR labels low-quality cells but doesn't delete them immediately. When you run clustering or UMAP, ArchR automatically filters the project to include only cells where `PassQC = 1`.
+
+---
+
+## Technical Summary Table
+
+| Metric Category        | Key Metric        | High Value Interpretation                     |
+| :--------------------- | :---------------- | :-------------------------------------------- |
+| **Purity**             | `TSSEnrichment`   | Strong biological signal; real cell.          |
+| **Efficiency**         | `PromoterRatio`   | Targeted sequencing; high-quality library.    |
+| **Technical Noise**    | `BlacklistRatio`  | Potential artifact or dying cell.             |
+| **Physical Integrity** | `NucleosomeRatio` | Poor enzyme access or DNA degradation.        |
+| **Depth**              | `nFrags`          | Highly sequenced cell with rich data density. |
+
+> **Note:** ArchR uses a default **nucLength** of **147 bp** (the length of DNA wrapped around a human nucleosome) to categorize all fragment sizes.
+
 ## 5.3 Manipulating an ArchR Project
 
 ### 5.3.1 Interacting with Metadata using the `$` Accessor
