@@ -391,8 +391,7 @@ To prove the reliability of the doublet scoring, ArchR's performance was measure
 * **Conclusion:** ArchR’s simulation method effectively distinguishes between "deeply sequenced single cells" and "true doublets," which a simple fragment cutoff would fail to do.
 
 \
-![](image-3.png)
-
+![alt text](image-3.png)
 * **True Positive Rate (Y-axis)**: The percentage of "real" doublets correctly identified.
 * **False Positive Rate (X-axis)**: The percentage of single cells mistakenly flagged as doublets.
 * **AUC (Area Under the Curve)**: A single number representing total accuracy. A score of 1.0 is a perfect test, while 0.5 (the dashed diagonal line) is no better than a random guess.
@@ -407,6 +406,8 @@ Following the computational removal of doublets, the data structure shifts from 
 
 * **Residual Black Dots**: 
 These are likely homotypic doublets (e.g., two Jurkat cells in one droplet). Because they have the same profile as a single Jurkat cell, they do not form "bridges" and are nearly impossible to remove computationally—but they also do not cause "phantom clusters," so they are less harmful to your analysis.
+
+\
 ![alt text](image-4.png)
 > **Thesis Note:** Use this "Before and After" comparison to demonstrate the effectiveness of your QC pipeline. It proves that ArchR effectively identifies heterotypic doublets (those between different cell types) which are the most damaging to cluster identity.
 
@@ -583,7 +584,7 @@ tss_scores <- proj$TSSEnrichment
 summary(proj$nFrags)
 ```
 
-![alt text](image-11.png)
+
 
 ### 5.2.4 Detailed cellColData Definitions
 
@@ -634,8 +635,7 @@ We can access the TSS Enrichment Scores for each cell:
 quantile(proj$TSSEnrichment)
 ``` 
 * Example for TSS Enrichment Score (Tutorial) 
-![alt text](image-12.png)
-
+![alt text](image-8.png)
 ### 5.3.2 Example 2: Subsetting an ArchRProject by Cells
 
 Subsetting is a powerful feature that allows you to create a new, smaller `ArchRProject` containing only a specific group of cells. This is essential if you want to analyze a single sample in isolation or remove specific clusters.
