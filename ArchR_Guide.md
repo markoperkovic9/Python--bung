@@ -1604,7 +1604,7 @@ The final paragraph of your text addresses a common frustration: **"Why does my 
 
 ---
 
-### Summary Checklist for your Guide
+### Summary 
 
 | Feature                     | Observation                                           | Action                                            |
 | :-------------------------- | :---------------------------------------------------- | :------------------------------------------------ |
@@ -1614,3 +1614,225 @@ The final paragraph of your text addresses a common frustration: **"Why does my 
 
 
 **Pro-Tip:** Always trust your Confusion Matrix over your UMAP. The heatmap tells you the truth about the data's structure, while the UMAP is just a "pretty picture" summary that can sometimes be misleading.
+
+__IMPORTANT__: Clustering and Visualization are two different things! They use the same input but use completely different algorithms. 
+
+# 8.0 Single-cell Embeddings
+
+Embeddings take the high-dimensional results from IterativeLSI and project them onto a 2D plane. This is the stage where your data finally "looks" like a single-cell experiment. We call these “embeddings” because they are strictly used to visualize the clusters and are not used to identify clusters which is done in an LSI sub-space as mentioned in previous chapters.
+
+### 8.1 Uniform Manifold Approximation and Projection (UMAP)
+
+UMAP is the preferred embedding in ArchR because of its speed and ability to preserve both local and global relationships between cells.
+
+#### Implementation Code
+
+```r
+# Calculate UMAP based on the IterativeLSI results
+projHeme2 <- addUMAP(
+  ArchRProj = projHeme2, 
+  reducedDims = "IterativeLSI", 
+  name = "UMAP", 
+  nNeighbors = 30, # Local vs Global: Higher values create a more "global" view; lower values focus on very local similarities.
+  minDist = 0.5, #Tightness: Controls ho wtightly packed the points are. Lower values (e.g., 0.1) result in tighter, denser clusters.
+  metric = "cosine", #The distance math used. "cosine" is typically better for sparse scATAC-seq data than "euclidean".        
+  force = TRUE
+)
+```
+
+You can list the available embeddings objects in an ArchRProject using the slot extraction opperator @:
+
+`projHeme2@embeddings`
+
+To plot the UMAP results, we use the `plotEmbedding()` function and pass the name of the UMAP embedding we just generated (“UMAP”). We can tell ArchR how to color the cells by using a combination of `colorBy` which tells ArchR which matrix to use to find the specified metadata column provided to `name`.
+```r
+p1 <- plotEmbedding(ArchRProj = projHeme2, colorBy = "cellColData", name = "Sample", embedding = "UMAP")
+```
+![alt text](image-22.png)
+---
+* Instead of coloring by “Sample” as above, we can color by “Clusters” which were identified in a previous chapter.
+```r 
+p2 <- plotEmbedding(ArchRProj = projHeme2, colorBy = "cellColData", name = "Clusters", embedding = "UMAP")
+```
+![alt text](image-23.png)
+---
+* We can visualize these two plots side by side using the ggAlignPlots() function, specifying a horizontal orientation using type = "h"
+```r
+ggAlignPlots(p1, p2, type = "h")
+```
+---
+To save an editable vectorized version of this plot, we use `plotPDF()`
+```r
+plotPDF(p1,p2, name = "Plot-UMAP-Sample-Clusters.pdf", ArchRProj = projHeme2, addDOC = FALSE, width = 5, height = 5)
+```
+### Interpreting Single-Cell UMAPs
+
+The UMAP (Uniform Manifold Approximation and Projection) is a 2D map where each dot represents a single cell. Cells that are plotted close together have highly similar chromatin accessibility profiles (and are therefore likely the same cell type), while cells located far apart are biologically distinct. 
+
+Visualizing the UMAP by different metadata columns is crucial for validating both the technical quality and the biological reality of your dataset.
+
+#### 1. Plot 1: UMAP Colored by Sample (Validating Integration)
+
+This plot serves as your primary **Batch Effect Check**. It shows the contribution of each individual sample to the overall map:
+* **Red (`scATAC_BMMC_R1`):** Bone Marrow Mononuclear Cells.
+* **Blue (`scATAC_CD34_BMMC_R1`):** CD34+ enriched Bone Marrow Cells (Stem/Progenitor cells).
+* **Green (`scATAC_PBMC_R1`):** Peripheral Blood Mononuclear Cells.
+
+**What does this tell us?**
+* **Biological Integration:** The Red (BMMC) and Green (PBMC) cells overlap heavily in the bottom-left "island" (Clusters 9, 10, 11) and the bottom-right tail (Cluster 3). This is an excellent result. It demonstrates that mature immune cells found in both the bone marrow and the blood (such as T-cells or B-cells) have nearly identical chromatin profiles, regardless of their extraction site.
+* **Biological Distinctness:** The top right section of the UMAP (Clusters 6, 7, 14) is dominated by the Blue (CD34+) and Red (BMMC) samples, with almost no Green (PBMC) cells. This aligns perfectly with known biology: CD34+ progenitor cells reside in the bone marrow and are rarely found in circulating peripheral blood.
+* **Conclusion:** Because the overlap aligns with biological expectations rather than segregating purely by sample origin, **we do not have a severe batch effect.** The integration is successful, and we can proceed without running Harmony batch correction.
+
+#### 2. Plot 2: UMAP Colored by Clusters (Validating Structure)
+
+This plot displays the result of the Seurat-based clustering algorithm. ArchR has mathematically partitioned the cells into 14 distinct populations based on their LSI coordinates.
+
+**What does this tell us?**
+* **Discrete Populations (The "Islands"):** The large, detached group on the left side of the UMAP (Clusters 9, 10, 11) represents a cell lineage that is highly distinct from the rest of the cells. In blood and bone marrow datasets, an isolated island like this is very often the Lymphoid lineage (T-cells, B-cells, NK cells).
+* **Continuous Populations (The "Continuum"):** The large, interconnected mass on the right side of the plot (Clusters 1 through 7, 12, 14) represents a developmental continuum. Notice the lack of hard visual breaks between these clusters. This visualizes a biological trajectory—likely hematopoietic stem cells (top right) slowly differentiating into mature myeloid cells (bottom right) through various intermediate, transitional states.
+* **Cluster Density:** Cluster 2 (dark blue, bottom right) is very dense and tightly packed, meaning those cells are highly homogenous. In contrast, Cluster 13 (light purple, top center) is much more diffuse, indicating greater biological variability and a broader gradient of cell states within that specific grouping.
+
+> **Thesis Tip:** When presenting these UMAPs in your results chapter, always show the "Sample" and "Cluster" plots side-by-side. This immediately answers the two most common questions from reviewers: "Did the samples integrate properly across different biological replicates?" and "How many biologically distinct populations did the algorithm successfully identify?"
+>
+
+
+## 8.2 t-Stocastic Neighbor Embedding (t-SNE)
+
+https://www.archrproject.com/bookdown/t-stocastic-neighbor-embedding-t-sne.html
+
+## 8.3 Dimensionality Reduction After Harmony
+
+If your initial UMAP colored by `Sample` showed significant technical separation—meaning cells of the same biological type were segregated purely by which sequencing run they belonged to—you need to apply **Batch Correction**. 
+
+ArchR natively integrates with **Harmony**, an algorithm designed to align single-cell data across different batches while preserving true biological variation.
+
+### Running Harmony
+Harmony works directly on the LSI coordinates. It pulls similar cells from different batches together in high-dimensional space. 
+
+```r
+# Apply Harmony batch correction to the LSI dimensions
+projHeme2 <- addHarmony(
+    ArchRProj = projHeme2,
+    reducedDims = "IterativeLSI",
+    name = "Harmony",
+    groupBy = "Sample", # The metadata column causing the batch effect
+    force = TRUE
+)
+```
+
+### Calculate a new UMAP using the Harmony-corrected dimensions
+```r
+projHeme2 <- addUMAP(
+    ArchRProj = projHeme2, 
+    reducedDims = "Harmony", # CRITICAL: Point to the corrected data!
+    name = "UMAPHarmony",    # Give it a unique name so you don't overwrite the old UMAP
+    nNeighbors = 30, 
+    minDist = 0.5, 
+    metric = "cosine",
+    force = TRUE
+)
+```
+
+### Plot the new Harmony UMAP colored by Sample
+```r
+p3 <- plotEmbedding(
+    ArchRProj = projHeme2, 
+    colorBy = "cellColData", 
+    name = "Sample", 
+    embedding = "UMAPHarmony"
+)
+```
+### Plot the new Harmony UMAP colored by Clusters
+```r 
+p4 <- plotEmbedding(
+    ArchRProj = projHeme2, 
+    colorBy = "cellColData", 
+    name = "Clusters", 
+    embedding = "UMAPHarmony"
+)
+```
+
+### Display or save
+```r
+plotPDF(p3, p4, name = "Plot-UMAP-Harmony-Sample-Clusters.pdf", ArchRProj = projHeme2, addDOC = FALSE)
+```
+
+![alt text](image-24.png)
+
+![alt text](image-25.png)
+
+### 8.5 Visual Comparison: Uncorrected LSI vs. Harmony Batch Correction
+
+When integrating multiple single-cell samples, it is critical to determine whether the cells are grouping by **true biological state** or by **technical artifacts** (batch effects). The side-by-side comparison of your UMAPs before and after Harmony provides a perfect textbook example of why batch correction is often necessary.
+
+#### 1. The Pre-Harmony (Uncorrected) UMAPs
+*Referencing Pages 1 & 2 (UMAP of IterativeLSI)*
+
+* **The Sample Separation:** In the uncorrected UMAP colored by `Sample`, there is distinct spatial segregation between the biological replicates. For instance, `scATAC_PBMC_R1` (Green) and `scATAC_BMMC_R1` (Red) form adjacent but largely separated territories.
+* **The Problem:** Biologically, we know that both Bone Marrow (BMMC) and Peripheral Blood (PBMC) contain identical mature immune cells (like circulating T-cells). In a perfect world, the red and green dots for these specific cell types should be perfectly stacked on top of each other. Their separation indicates that the LSI algorithm is picking up on the "technical signature" of the sequencing run rather than just the biology.
+* **Cluster Artifacts:** Because of this separation, the 14 clusters identified are likely biased. Some clusters might simply be "PBMC T-cells" and "BMMC T-cells" split into two groups, which artificially inflates your cluster count.
+
+#### 2. The Post-Harmony (Corrected) UMAPs
+*Referencing Pages 3 & 4 (UMAPHarmony of Harmony)*
+
+* **The Sample Integration:** The `UMAPHarmony` colored by `Sample` represents the data after the Harmony algorithm has aligned the shared biological states. 
+* **The Fix:** Harmony effectively forces cells with similar biological signatures to overlap in high-dimensional space, regardless of their origin batch. You will typically see the Red and Green samples thoroughly mixed within the mature immune cell clusters. Crucially, Harmony is "biology-aware"—it should leave the unique `scATAC_CD34_BMMC_R1` (Blue) progenitor cells distinct, as they do not have a biological equivalent in the peripheral blood sample.
+* **Refined Biological Structure:** The topology of the `UMAPHarmony` colored by `Clusters` shifts significantly. We still see the detached "lymphoid" island (Clusters 9, 10, 11) and the main developmental continuum (Clusters 1 through 7), but the cells within them are now organized by their true biological identity. 
+
+#### 3. Discussion & Conclusion
+
+**Why does this matter?**
+If you proceed with the uncorrected IterativeLSI dimensions, your downstream analysis will be flawed. For example, if you look for differentially accessible peaks between Cluster X and Cluster Y, you might just be finding the technical noise between the PBMC and BMMC sequencing runs. 
+
+By using the **Harmony-corrected UMAP**, you ensure that your clusters represent genuine cell types and states. This makes your subsequent steps—identifying marker genes, assigning cell type labels, and building developmental trajectories—biologically accurate and highly robust.
+
+> **Thesis Tip:** Include these four plots as a 2x2 multi-panel figure in your methodology or supplementary section. Use it to explicitly justify your use of Harmony. A statement like, *"Initial dimensionality reduction via IterativeLSI revealed prominent batch effects driven by sample origin (Fig A). Application of Harmony successfully integrated shared mature lineages across BMMC and PBMC samples while preserving the unique CD34+ progenitor populations (Fig C),"* demonstrates deep analytical rigor to your committee.
+>
+
+### 8.4 Highlighting specific cells on an embedding
+
+#### Basics
+https://www.archrproject.com/bookdown/highlighting-specific-cells-on-an-embedding.html
+
+#### Identifying Cell Types with Gene Scores
+
+In scATAC-seq, we do not directly measure RNA transcripts. Instead, ArchR calculates a **Gene Score** by summing the chromatin accessibility signal across the gene body and its surrounding regulatory elements. This score serves as a highly accurate proxy for gene expression, allowing us to identify cell clusters using known biological markers.
+
+#### 1. Highlighting Specific Clusters
+Sometimes, projecting a marker gene across the entire UMAP can be noisy. To clean up the visualization, you can use the `highlightCells` parameter to isolate specific clusters of interest. All other cells will be rendered as a grey background.
+
+```r
+# Plot CD14 Gene Scores, highlighting ONLY Clusters 1 through 5
+plotEmbedding(
+  ArchRProj = projHeme2,
+  embedding = "UMAP",
+  colorBy = "GeneScoreMatrix",
+  name = "CD14",
+  size = 1,
+  sampleCells = NULL,
+  highlightCells = getCellNames(ArchRProj = projHeme2)[which(projHeme2@cellColData$Clusters %in% c("C1","C2","C3","C4","C5"))],
+  baseSize = 10,
+  plotAs = "points"
+)
+```
+
+![alt text](image-26.png)
+#### 2. __Interpreting the Marker Plot__
+
+  The Marker: CD14 is a standard marker for the monocyte lineage.  
+
+  The Visual: The plot utilizes a heatmap gradient (Log2(NormCounts + 1)).  
+
+  Grey Cells: Cells outside of our target clusters (C1-C5).  
+
+  Dark Blue Cells: Target clusters with closed, inaccessible chromatin at the CD14 locus.
+
+  Yellow/Pink Cells: Target clusters with highly accessible CD14 chromatin, confirming their identity as monocytes.
+
+  Biological Takeaway: The presence of a gradient within this highlighted continuum indicates a developmental trajectory. We can visually trace the maturation of these cells as the CD14 gene becomes progressively more accessible.
+
+  * Thesis Tip: When assigning identities to your clusters, single-marker UMAPs are highly persuasive. If you label a cluster as "Monocytes" in your text, referencing a supplemental figure showing bright yellow CD14 gene scores precisely over that cluster provides the necessary biological proof for your computational claims.
+
+## 8.5  Importing an embedding from external software
+
+https://www.archrproject.com/bookdown/importing-an-embedding-from-external-software.html
