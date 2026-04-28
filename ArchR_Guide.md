@@ -1153,3 +1153,464 @@ In the provided plot, we see three distinct lines:
 # 5.6 Filtering Doublets from an ArchRProject
 
 Doublets occur when two nuclei are captured in a single droplet. In scATAC-seq, these artifacts can lead to "ghost clusters" or false transitions in trajectory analysis. `filterDoublets()` removes these cells based on the scores calculated during the initial QC phase.
+
+More on this topic here: https://www.archrproject.com/bookdown/filtering-doublets-from-an-archrproject.html
+
+
+# 6. Dimensionality reduction with ArchR
+
+
+![alt text](image-14.png)
+
+![alt text](image-15.png)
+
+## 6.2. Iterative Latent Semantic Indexing (LSI)
+
+
+In single-cell analysis, "Dimensionality Reduction" is the process of compressing thousands of genomic features into a few coordinates (like a UMAP) that we can actually visualize and cluster.
+
+### 1. The Comparison: scRNA-seq vs. scATAC-seq
+
+| Feature                 | scRNA-seq (Gene Expression)                                                  | scATAC-seq (Chromatin)                                                                                                          |
+| :---------------------- | :--------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| **Data Type**           | **Continuous/Counts:** You can have 0, 1, 10, or 100 transcripts.            | **Binary:** A region is either open (1) or closed (0).                                                                          |
+| **Selection Strategy**  | **Highly Variable Genes (HVGs):** Easy to find genes that vary across cells. | **Highly Accessible Peaks:** Selecting the "most open" regions fails.                                                           |
+| **The "Noise" Problem** | Noise is usually technical (dropout).                                        | "Most accessible" regions are often "housekeeping" sites (open in all cells), which adds noise and masks cell-type differences. |
+
+---
+
+## 2. The Solution: The "Iterative LSI" Approach
+Because we cannot identify "variable" peaks in a binary matrix effectively, ArchR uses a multi-step refinement process.
+
+![alt text](image-16.png)
+
+
+### Phase 1: The "Rough Sketch"
+ArchR starts by looking at the **most accessible tiles** (usually 500bp windows). 
+* **Action:** It runs an initial Latent Semantic Indexing (LSI) transformation.
+* **Goal:** To get a "low-resolution" look at the data. 
+* **Result:** This identifies major cell lineages (e.g., separating all T-cells from all B-cells) without getting bogged down in technical "batch" differences.
+
+### Phase 2: Feature Refinement
+Once these "rough" clusters are identified, ArchR calculates the average accessibility for each group.
+* **Action:** It asks, *"Which peaks are actually different between Cluster A and Cluster B?"*
+* **Goal:** To find the **Variable Peaks**.
+* **Result:** This filters out the "housekeeping" noise and focuses on biologically informative regions.
+
+### Phase 3: The "High-Definition" Map
+ArchR runs LSI **a second time** (or more), but this time it only uses the variable features found in Phase 2.
+* **Result:** A much cleaner dimensionality reduction that minimizes batch effects and provides a more accurate biological "fingerprint" of each cell.
+
+---
+
+## 3. Implementation in ArchR
+The `addIterativeLSI()` function automates this entire process.
+
+```R
+projHeme2 <- addIterativeLSI(
+    ArchRProj = projHeme2,
+    useMatrix = "TileMatrix", 
+    name = "IterativeLSI", 
+    iterations = 2, 
+    clusterParams = list( #See Seurat::FindClusters
+        resolution = c(0.2), 
+        sampleCells = 10000, 
+        n.start = 10
+    ), 
+    varFeatures = 25000, 
+    dimsToUse = 1:30
+)
+```
+
+## Parameter Breakdown: `addIterativeLSI()`
+
+The `addIterativeLSI()` function is the primary tool in ArchR for dimensionality reduction. It uses a multi-pass approach to distinguish biological signal from technical noise.
+
+### Configuration Table
+
+| Parameter           | Value            | Description                                                                                                                                                                 |
+| :------------------ | :--------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`ArchRProj`**     | `projHeme2`      | The **ArchRProject** object to which the dimensionality reduction will be added.                                                                                            |
+| **`useMatrix`**     | `"TileMatrix"`   | The input data matrix. Using the `TileMatrix` (500bp windows) allows for an unbiased initial pass before peaks are even called.                                             |
+| **`name`**          | `"IterativeLSI"` | The name given to this specific reduction. This allows you to store multiple runs (e.g., with different parameters) in the same project.                                    |
+| **`iterations`**    | `2`              | The number of times the LSI process is repeated. The first pass finds broad clusters; subsequent passes use features variable across those clusters to refine the results.  |
+| **`clusterParams`** | `list(...)`      | A list of parameters passed to the clustering algorithm (uses `Seurat::FindClusters`). These "internal" clusters are used to identify variable features between LSI rounds. |
+| **`resolution`**    | `0.2`            | The granularity of the internal clustering. Higher values lead to more clusters. For the first iteration, a low resolution is preferred to capture major cell lineages.     |
+| **`sampleCells`**   | `10000`          | The number of cells sampled to perform the "Estimated LSI" procedure. This allows the function to scale to millions of cells without crashing your RAM.                     |
+| **`n.start`**       | `10`             | The number of random starting points for the K-means clustering step, ensuring the identified clusters are stable.                                                          |
+| **`varFeatures`**   | `25000`          | The number of top "variable features" (tiles or peaks) used for the final LSI. These features drive the separation in your UMAP.                                            |
+| **`dimsToUse`**     | `1:30`           | The LSI dimensions (components) to be retained. Typically, the first 30 dimensions capture the majority of biological variance. __Biological Intuition:__ If your clusters don't make sense (e.g., they don't match known markers), you can manually override the algorithm. __Action:__ Change dimsToUse = 1:30 to dimsToUse = 2:30. This completely ignores the first dimension and forces the UMAP/Clustering to rely on the remaining, usually cleaner, dimensions.                                             |
+
+---
+
+
+
+![alt text](image-17.png) ![alt text](image-18.png)
+
+## Version 1 Interpretation: Broad Lineage Identification
+
+Version 1 represents the baseline "QC pass" for dimensionality reduction. Using **2 iterations**, a fixed **resolution of 0.2**, and **25,000 variable features**, this run provides a broad, low-resolution view of the major cell lineages in the dataset.
+
+---
+
+### 1. Global Topology and Structure
+The UMAP in Version 1 shows cells forming a largely **continuous and singular mass**.
+* **Connectivity:** The different biological groups are not yet clearly separated into distinct "islands".
+* **Feature Impact:** By using 25,000 features, the model retains a high amount of genomic information, including "housekeeping" accessibility common to many cells.
+* **Biological Signal:** This results in a "cloud-like" structure where broad differences are visible, but subtle transition states between closely related cell types remain blurred.
+
+
+
+### 2. Cluster Granularity
+The algorithm identifies **7 distinct clusters** (C1 through C7).
+* **Major Lineages:** These clusters capture the primary biological "continents" of the data, such as mature vs. progenitor populations.
+* **Cluster 2 (Dark Blue):** This group is positioned at the bottom of the mass, clearly separating a specific lineage (CD34+ progenitors) from the rest of the cells.
+* **Resolution Limits:** Because only two iterations were performed with a 0.2 resolution, the algorithm misses smaller sub-populations that only become distinct when background noise is further filtered.
+
+### 3. Sample Integration and Batch Effects
+The `SampleName` plot confirms that the dimensionality reduction successfully handled technical variation between samples.
+* **Successful Mixing:** Samples **1-scATAC_BMMC_R1** (red) and **3-scATAC_PBMC_R1** (green) are well-integrated and overlap extensively.
+* **Biological Isolation:** Sample **2-scATAC_CD34_BMMC_R1** (blue) remains relatively isolated in Cluster 2.
+* **Interpretation:** This confirms that the separation seen is driven by **biology** (progenitor status) rather than **technical batch**, which would have caused the samples to group separately by name.
+
+---
+
+### Summary Table for Version 1
+
+| Metric                 | Observation          | Interpretation                                                                            |
+| :--------------------- | :------------------- | :---------------------------------------------------------------------------------------- |
+| **Cluster Count**      | 7 Clusters           | Identifies major cell populations; lacks sub-type resolution.               |
+| **Topology**           | Connected "Mass"     | High feature count (25k) preserves common signals, keeping clusters close.    |
+| **Integration**        | Well-mixed Red/Green | Strong batch correction between BMMC and PBMC samples[cite: 6, 8, 21].                    |
+| **Lineage Definition** | Broad Lineages       | Ideal for a first-pass analysis to verify data quality and major cell groups. |
+
+
+
+**Conclusion:** Version 1 serves as an essential check to ensure that different samples are integrating properly before moving to higher-resolution runs like Version 4.
+
+## Version 4
+
+We used this function for another dimensionality reduction, just to visualize differences:
+
+```r
+projHeme2 <- addIterativeLSI(
+    ArchRProj = projHeme2,
+    useMatrix = "TileMatrix", 
+    name = "IterativeLSI2", 
+    iterations = 4, 
+    clusterParams = list( #See Seurat::FindClusters
+        resolution = c(0.1, 0.2, 0.4), 
+        sampleCells = 10000, 
+        n.start = 10
+    ), 
+    varFeatures = 15000, 
+    dimsToUse = 1:30
+)
+```
+
+The output of the 4th iteration is as follows:
+
+![alt text](image-19.png), ![alt text](image-20.png)
+
+---
+
+### 1. Global Topology: The "Two-Island" Structure
+The most significant change in Version 4 is the shift in topology; the continuous mass from Version 1 has split into two distinct "islands".
+* **Lineage Separation:** This clear physical separation on the UMAP indicates that the algorithm has successfully isolated the primary biological lineages (likely Lymphoid vs. Myeloid/Progenitor).
+* **Reduced Background:** Lowering the `varFeatures` to 15,000 removed thousands of "housekeeping" peaks that previously blurred these groups together, allowing for a cleaner mathematical separation.
+* **Distinct States:** The distance between these islands suggests that the chromatin accessibility profiles of these groups are fundamentally different, providing a superior starting point for cell-type identification.
+
+
+
+### 2. Cluster Granularity (11 Clusters)
+Version 4 identifies **11 clusters** (C1 through C11), a significant increase from the 7 clusters found in Version 1.
+* **Sub-type Discovery:** The high final resolution (0.4) allows for the identification of subtle sub-populations. For example, the smaller island on the right is now divided into three distinct groups (Clusters 5, 6, and 7).
+* **Stable Grouping:** On the larger left island, clusters 8, 9, 10, and 11 show a clear "flow" or transition, which likely represents different stages of cell differentiation or maturation.
+
+### 3. Advanced Integration & Batch Correction
+The `SampleName` plot for Version 4 shows excellent integration, confirming that the refinement is biological, not technical.
+* **Seamless Mixing:** Samples **1-scATAC_BMMC_R1** (red) and **3-scATAC_PBMC_R1** (green) are perfectly blended within the same clusters on both islands.
+* **The "Anchor" Effect:** By starting at a very low resolution (0.1), ArchR first identified the major biological groups across all samples. This ensured that the subsequent higher-resolution passes refined the biological signal rather than separating cells by their original sample batch.
+* **Progenitor Status:** The **2-scATAC_CD34_BMMC_R1** sample (blue) remains a distinct population (concentrated in Clusters 2, 3, and 4), confirming that these progenitor cells have a unique and recognizable chromatin landscape.
+
+---
+
+### Comparison Summary: Version 1 vs. Version 4
+
+| Metric       | Version 1 (The Rough Draft)                        | Version 4 (The Final Map)                                         |
+| :----------- | :------------------------------------------------- | :---------------------------------------------------------------- |
+| **Topology** | Single, connected "cloud". | Two distinct, lineage-specific islands. |
+| **Clusters** | 7 Clusters (Broad) .      | 11 Clusters (High-resolution)].          |
+| **Noise**    | Higher (25k features).     | Lower (15k features); more specific.    |
+| **Use Case** | Quick verification of sample mixing.               | Deep discovery of sub-types and lineages.                         |
+
+
+
+
+### Understanding the "Iterative" Logic
+
+ArchR doesn't just run a single PCA-like transformation. It follows a "Zoom-In" logic:
+
+1. **Iteration 1 (The Wide Lens):** Uses the most accessible tiles to find the "big" differences (e.g., Lymphocytes vs. Myeloid cells).
+2. **Feature Selection:** It identifies which peaks are actually different *between* those big groups.
+3. **Iteration 2 (The Macro Lens):** Re-runs the LSI using only those specific, biologically informative peaks. 
+
+
+
+### Important Note: Dimension 1 Correlation
+In scATAC-seq, **LSI Dimension 1** is often highly correlated with **Sequencing Depth** (how many fragments a cell has). 
+* **Action:** After running this command, check the correlation. 
+* **Adjustment:** If LSI1 is purely technical noise, you should change `dimsToUse` to `2:30` in your downstream UMAP and Clustering functions.
+
+
+
+
+## 6.3 Estimated LSI: Scaling to Massive Datasets
+
+When working with "atlas-scale" datasets (hundreds of thousands to millions of cells), computing a full LSI matrix is often impossible due to RAM (memory) limitations. **Estimated LSI** is ArchR's optimization for these massive projects.
+
+---
+
+### 1. The Core Concept: "Landmarks & Projection"
+Instead of calculating the mathematical relationship between every single cell at once, ArchR uses a representative subset to build the coordinate system.
+
+* **Landmark Cells:** ArchR selects a random subset of cells to define the "rules" of the LSI space.
+* **Projection:** The remaining cells are then "projected" into that pre-defined space.
+* **Disk-Backed Processing:** Because ArchR reads the non-landmark cells from the Arrow files on your disk one by one, it never needs to load the entire dataset into your RAM at once.
+
+
+
+---
+
+### 2. The Step-by-Step Workflow
+1.  **Selection:** A specific number of "landmark" cells is randomly sampled from the project.
+2.  **LSI on Landmarks:** ArchR performs standard LSI (TF-IDF and SVD) on only these landmarks.
+3.  **IDF Transfer:** The **Inverse Document Frequency (IDF)** values—the weights that tell us which peaks are most informative—are saved from the landmark set.
+4.  **Projection:** All other cells are normalized using those landmark weights and moved into the landmark-defined space.
+
+---
+
+### 3. Key Parameters in `addIterativeLSI()`
+You trigger Estimated LSI by adding these two parameters to your function call:
+
+| Parameter              | Function                                                                               |
+| :--------------------- | :------------------------------------------------------------------------------------- |
+| **`sampleCellsFinal`** | The number of cells to be used as the "landmark" set (e.g., 50,000).                   |
+| **`projectCellsPre`**  | A logical (`TRUE`/`FALSE`) that tells ArchR to use the landmark subset for projection. |
+
+---
+
+### 4. Important Considerations
+* **Landmark Diversity:** The landmark set must be large enough to capture rare cell types. If a cell type makes up only 0.1% of your data and you only pick 1,000 landmarks, you might miss that population entirely in your initial map.
+* **Memory vs. Accuracy:** While estimated LSI is slightly less precise than a full LSI calculation, the difference is negligible for large datasets and is often the only way to process them on standard hardware.
+
+Estimated LSI allows you to analyze **millions of cells** without needing a supercomputer. It builds a high-quality "anchor" map using a subset of your data and then fits the rest of the cells into that map efficiently.
+
+## 6.4 Batch Effect Correction with Harmony
+
+While ArchR's **Iterative LSI** is designed to minimize technical noise, some datasets exhibit "strong" batch effects where cells group by sample or processing date rather than biology. In these cases, ArchR uses **Harmony**, a popular batch-correction algorithm originally developed for scRNA-seq.
+
+---
+
+### 1. What is Harmony?
+Harmony is an algorithm that "aligns" clusters across different batches. It projects cells into a shared space and then iteratively moves them until the clusters from different samples overlap, provided they share the same biological identity.
+
+* **Input:** An existing dimensionality reduction (e.g., your `IterativeLSI` object).
+* **Output:** A new, corrected dimensionality reduction object (e.g., `Harmony`).
+* **The Goal:** To ensure that a "T-cell" from Sample A and a "T-cell" from Sample B are located at the same coordinates in your UMAP.
+
+
+
+---
+
+### 2. Parameter Breakdown: `addHarmony()`
+
+| Parameter         | Value            | Description                                                                                   |
+| :---------------- | :--------------- | :-------------------------------------------------------------------------------------------- |
+| **`ArchRProj`**   | `projHeme2`      | Your active ArchRProject.                                                                     |
+| **`reducedDims`** | `"IterativeLSI"` | The name of the input dimensionality reduction you want to correct.                           |
+| **`name`**        | `"Harmony"`      | The name you want to give to the new, corrected reducedDims object.                           |
+| **`groupBy`**     | `"Sample"`       | The column in your metadata that defines the batches (e.g., "Sample", "Replicate", or "Day"). |
+
+---
+
+### 3. Implementation Code
+
+```R
+# Correcting for batch effects using Harmony
+projHeme2 <- addHarmony(
+    ArchRProj = projHeme2,
+    reducedDims = "IterativeLSI",
+    name = "Harmony",
+    groupBy = "Sample"
+)
+
+# Note: Harmony typically converges quickly (e.g., 3-10 iterations)
+```
+
+# Chapter 7: Clustering with ArchR - Basics & Biological Background
+
+Clustering is a fundamental step in single-cell analysis that allows us to organize thousands of individual cells into meaningful groups based on their molecular profiles.
+
+### 1. Biological Significance: Why Cluster?
+In a complex tissue sample, different cells perform different functions. These functions are driven by which parts of the DNA are "open" (accessible) and available for transcription. 
+* **Identifying Cell Identity:** By grouping cells with similar chromatin accessibility patterns, we can identify distinct cell types (e.g., T-cells vs. B-cells) and cell states (e.g., resting vs. activated).
+* **Unbiased Discovery:** Clustering is an "unsupervised" process. We don't tell the computer what cell types exist; instead, the computer finds groups that naturally exist in the data based on their shared epigenetic fingerprints.
+
+
+---
+
+### 2. The Logic: From LSI to Clusters
+Clustering is rarely performed on the raw, sparse data matrix. Instead, it happens in the "Reduced Dimension" space created by LSI or Harmony.
+
+1.  **Reduced Dimensions:** We use the coordinates from LSI (e.g., 30 dimensions) as the input.
+2.  **Nearest Neighbor Graph:** The algorithm looks at every cell and identifies its closest "neighbors" in that 30D space.
+3.  **Community Detection:** The computer then finds "communities" (clusters) of cells that are more densely connected to each other than to the rest of the graph.
+
+---
+
+### 3. Core Algorithmic Concepts
+ArchR leverages state-of-the-art tools from the scRNA-seq world (like **Seurat**) to perform these calculations because they are robust and highly scaleable.
+
+* **Graph-Based Clustering:** This is the industry standard. It treats cells like nodes in a social network and finds the "friend groups".
+* **Louvain/Leiden Algorithms:** These are the specific mathematical formulas used to find these communities. In ArchR, this process is **deterministic**, meaning that if you run the same data twice with the same settings, you will get the exact same clusters.
+
+---
+
+
+
+| Concept       | Explanation                                                          |
+| :------------ | :------------------------------------------------------------------- |
+| **Input**     | Reduced dimensions (e.g., `IterativeLSI` or `Harmony`).              |
+| **Goal**      | Discover distinct cell types/states without prior labeling.          |
+| **Technique** | Nearest-Neighbor graph construction followed by community detection. |
+| **Tools**     | ArchR wraps standard scRNA-seq methods (Seurat, scran).              |
+
+
+**Next Steps:** Once clusters are identified, we can calculate **Marker Peaks** and **Gene Scores** to determine what those clusters actually represent (e.g., Cluster 1 = Monocytes).
+
+## 7.1 Clustering using Seurat's FindClusters() function
+
+In ArchR, the most common and successful method for identifying cell groups is the **graph-based clustering** approach implemented by the `Seurat` package. This method is deterministic and highly effective for high-dimensional single-cell data.
+
+---
+
+### 1. The Method: Graph-Based Community Detection
+Instead of calculating the distance between every pair of cells (which is slow), this method builds a "web" of connections:
+1.  **Nearest Neighbor Graph:** It identifies the $k$ most similar cells (neighbors) for every cell in the LSI/Harmony space.
+2.  **SNN (Shared Nearest Neighbor):** It weights the edges between cells based on how many neighbors they share.
+3.  **Louvain Algorithm:** It uses the Louvain community detection algorithm to find groups of cells that are more tightly knit than others.
+
+
+
+---
+
+### 2. Implementation: `addClusters()`
+The `addClusters()` function acts as a wrapper that passes your dimensionality reduction coordinates directly to Seurat's clustering engine.
+
+```R
+projHeme2 <- addClusters(
+    input = projHeme2,
+    reducedDims = "IterativeLSI", # Or "Harmony"
+    method = "Seurat",
+    name = "Clusters",
+    resolution = 0.8              # Higher = more clusters; Lower = fewer
+)
+```
+
+To access these clusters we can use the `$` accessor which shows the cluster ID for each single cell.
+```r
+head(projHeme2$Clusters)
+## [1] "C9"  "C11" "C4"  "C4"  "C4"  "C7"
+```
+
+We can tabulate the number of cells present in each cluster:
+```r
+table(projHeme2$Clusters)
+## 
+##   C1  C10  C11  C12   C2   C3   C4   C5   C6   C7   C8   C9 
+## 1532  903 1250  633 1120  314  351  386  702 1261 1377  421
+```
+
+To better understand which samples reside in which clusters, we can create a cluster confusion matrix across each sample using the confusionMatrix() function.
+```r
+cM <- confusionMatrix(paste0(projHeme2$Clusters), paste0(projHeme2$Sample))
+cM
+## 12 x 3 sparse Matrix of class "dgCMatrix"
+##     scATAC_BMMC_R1 scATAC_CD34_BMMC_R1 scATAC_PBMC_R1
+## C9             254                   5            162
+## C11           1202                   .             48
+## C4             351                   .              .
+## C7             310                 940             11
+## C1            1489                  10             33
+## C6             171                 531              .
+## C8             139                1238              .
+## C12             86                   .            547
+## C3             160                 144             10
+## C10            322                   .            581
+## C2             117                   2           1001
+## C5              88                 298              .
+```
+
+To plot this confusion matrix as a heatmap, we use the pheatmap package:
+```r 
+library(pheatmap)
+cM <- cM / Matrix::rowSums(cM)
+p <- pheatmap::pheatmap(
+    mat = as.matrix(cM), 
+    color = paletteContinuous("whiteBlue"), 
+    border_color = "black"
+)
+p
+```
+\
+__As a result, we get this heatmap:__
+![alt text](image-21.png)
+
+There are times where the relative location of cells within the 2-dimensional embedding does not agree perfectly with the identified clusters. More explicitly, cells from a single cluster may appear in multiple different areas of the embedding. In these contexts, it may be appropriate to adjust the clustering parameters or embedding parameters until there is agreement between the two.
+
+
+
+### 1. Understanding the Heatmap (The Confusion Matrix)
+It shows a **normalized Confusion Matrix** visualized as a heatmap. It tells us exactly how our biological samples are distributed across the identified clusters.
+
+* **Normalization:** The code `cM / Matrix::rowSums(cM)` is crucial. It ensures that the color intensity represents the **proportion** of each cluster's cells found in a given sample, rather than the raw count.
+* **Reading the Blocks:**
+    * **The CD34+ Progenitor Group:** Clusters **C3, C8, C5, C7, and C6** are almost exclusively found in the `scATAC_CD34_BMMC_R1` sample (the dark blue blocks on the left). This confirms these are progenitor-specific cell types.
+    * **The BMMC Group:** Clusters **C4, C11, and C1** are specific to the `scATAC_BMMC_R1` sample.
+    * **The PBMC Group:** Clusters **C10, C12, and C2** are dominant in the `scATAC_PBMC_R1` sample.
+* **The "Shared" Clusters:** Notice **C9**. It has lighter blue across multiple columns, indicating it contains a mixture of cells from different samples—likely a common mature cell type present in both bone marrow and peripheral blood.
+
+
+---
+
+### 2. The Logic: Why Use Graph-Based Clustering?
+ArchR uses the **Seurat** engine because graph-based clustering is "community-driven" rather than distance-driven.
+1.  **SNN Graph:** It creates a web of connections where "friendships" (edges) are stronger if cells share many of the same neighbors.
+2.  **Louvain Algorithm:** It identifies "neighborhoods" where cells are more connected to each other than to the rest of the map.
+3.  **Determinism:** This process is **deterministic**—unlike some older methods, running this with the same settings will always yield the exact same cluster IDs.
+
+---
+
+### 3. Resolving Discrepancies: Clusters vs. Embeddings
+The final paragraph of your text addresses a common frustration: **"Why does my UMAP look different than my Clusters?"**
+
+* **30D vs. 2D:** Clustering happens in the high-dimensional LSI space (e.g., 30 dimensions). A UMAP is a **projection** into 2D. In 30 dimensions, two groups might be clearly separate, but the 2D "shadow" (UMAP) might make them look like they overlap.
+* **Disconnected Clusters:** Sometimes, cells in Cluster 1 might appear in two different "islands" on your UMAP. 
+    * **The Interpretation:** Usually, the high-dimensional clustering is more mathematically accurate than the 2D visualization.
+* **How to Fix It:** If the disagreement is severe, you have two options:
+    1.  **Adjust Clustering:** Change the `resolution` (lower it to merge split groups, raise it to separate them).
+    2.  **Adjust Embedding:** Tweak UMAP parameters like `nNeighbors` or `minDist` to better represent the high-dimensional structure.
+
+---
+
+### Summary Checklist for your Guide
+
+| Feature                     | Observation                                           | Action                                            |
+| :-------------------------- | :---------------------------------------------------- | :------------------------------------------------ |
+| **High Resolution (0.8)**   | Leads to more, smaller clusters.                      | Lower to 0.4 if clusters look too fragmented.     |
+| **Sample-Specific Cluster** | Cluster appears in only one sample in the heatmap.    | Verify if this is real biology or a batch effect. |
+| **Split Clusters on UMAP**  | One cluster ID is found in two separate UMAP islands. | Re-evaluate LSI dimensions or UMAP settings.      |
+
+
+**Pro-Tip:** Always trust your Confusion Matrix over your UMAP. The heatmap tells you the truth about the data's structure, while the UMAP is just a "pretty picture" summary that can sometimes be misleading.
