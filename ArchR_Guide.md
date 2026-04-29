@@ -1836,3 +1836,315 @@ plotEmbedding(
 ## 8.5  Importing an embedding from external software
 
 https://www.archrproject.com/bookdown/importing-an-embedding-from-external-software.html
+
+# 9.0 Gene Scores and Marker Genes: The Biological Background
+
+To effectively analyze your Atrial Fibrillation (AF) scATAC-seq dataset, you must translate raw chromatin accessibility peaks into biologically meaningful units: **genes**. Because you are working purely with DNA accessibility (not RNA transcripts), understanding how ArchR bridges this gap is fundamental to interpreting your cardiomyocyte clusters and mapping variant effects.
+
+### 1. The scATAC-seq Challenge: We Don't Measure RNA
+In a standard scRNA-seq experiment, you directly count the mRNA transcripts produced by a cell to determine which genes are turned "on." In scATAC-seq, you do not measure RNA. Instead, you measure the physical "openness" of the chromatin. 
+
+While open chromatin is a prerequisite for transcription, it is not a direct 1:1 measurement of it. A region might be open because a transcription factor is bound, but the gene isn't actively firing yet (a "poised" state). Therefore, we must *infer* gene expression based on the epigenomic landscape.
+
+### 2. What is a "Gene Score"?
+A **Gene Score** (or Gene Activity Score) is ArchR’s mathematical prediction of how highly expressed a gene is, based entirely on the surrounding open chromatin. 
+
+
+
+ArchR calculates this score by looking at a massive genomic window around every gene and summing the ATAC-seq signal based on specific biological rules:
+* **The Promoter:** The region immediately upstream of the Transcription Start Site (TSS) is given the highest weight. If the promoter is closed, the gene is almost certainly off.
+* **The Gene Body:** Accessibility across the actual coding region of the gene is also heavily weighted, as open chromatin here indicates active transcription machinery moving through the DNA.
+* **Distal Enhancers (Distance-Weighted):** ArchR looks at open peaks far away from the gene (up to hundreds of kilobases). Because enhancers loop over to touch promoters in 3D space, open enhancers contribute to the Gene Score. ArchR uses a "distance decay" model, meaning a peak 10kb away contributes more to the score than a peak 100kb away.
+
+### 3. What is a "Marker Gene"?
+A **Marker Gene** is a gene whose high expression (and therefore, high Gene Score) uniquely defines a specific cell identity, anatomical region, or disease state. In your thesis, you will use marker genes to annotate your UMAP clusters.
+
+Since you are comparing different regions of the heart, you must rely on region-specific cardiomyocyte (CM) markers:
+* **Pan-Cardiomyocyte Markers:** *TNNT2*, *MYH6*. If a cluster has high gene scores for these, it is a CM (not a fibroblast or endothelial cell).
+* **Atrial Markers:** *NPPA*, *MYL4*. 
+* **Left-Atrium Specific:** *PITX2* (This is the most critical marker for your AF thesis, as *PITX2* defines left-atrial identity).
+* **Ventricular Markers:** *MYL2*, *MYH7*. 
+
+When you plot the Gene Score of *MYL2* on your UMAP, it will "light up" the ventricular clusters and remain dark in the atrial clusters.
+
+### 4. Relevance to Atrial Fibrillation (AF) Pathophysiology
+During Atrial Fibrillation, the atria undergo massive electrical and structural remodeling. This means the epigenetic landscape changes, and consequently, the Gene Scores will shift.
+
+* **Fetal Gene Program:** Stressed cardiomyocytes often revert to a fetal state. You may see AF clusters showing high Gene Scores for fetal markers (*NPPA*, *NPPB*) compared to healthy tissue.
+* **Ion Channel Remodeling:** You can use Gene Scores to investigate whether the chromatin around key potassium and sodium channels (like *KCNQ1* or *SCN5A*) closes during AF, leading to the electrical chaos characteristic of the disease.
+
+### 5. Connecting to Variant Effect Prediction (VEP)
+This is the core of your thesis. Why do we care about Gene Scores when looking at genetic variants?
+
+GWAS studies have identified hundreds of single nucleotide polymorphisms (SNPs) associated with AF. Over 90% of these sit in non-coding enhancers, not in the genes themselves. 
+1. **The Problem:** If a SNP sits in an enhancer in the middle of nowhere, how do you know which gene it causes to malfunction?
+2. **The ArchR Solution:** Because ArchR's Gene Scores incorporate distal enhancers into their calculations, you can mathematically link an enhancer peak to a specific gene's promoter. 
+3. **Variant Effect Prediction:** If an AF patient has a mutation in an enhancer, your predictive model will try to determine if that mutation destroys a Transcription Factor binding site. If it does, the enhancer closes. Because the enhancer closes, the **Gene Score** for the linked target gene (e.g., *PITX2*) drops. This mechanical chain of events is what you are predicting.
+
+> **Thesis Application:** In your analysis pipeline, you will first use well-established Marker Genes to confidently label your LA, RA, LV, and RV cardiomyocyte clusters. Once the identities are locked in, you will calculate Gene Scores across the entire genome to find out which specific genes are epigenetically silenced or activated during Atrial Fibrillation.
+
+
+## 9.1 How ArchR Calculates Gene Scores: The Default Model
+
+In scATAC-seq, predicting RNA expression from chromatin accessibility is a complex mathematical challenge. The paragraph from the ArchR tutorial highlights the winning algorithm they developed after testing 50 different variations. 
+
+To make your Variant Effect Prediction (VEP) accurate, you need to understand how ArchR decides which ATAC-seq peaks belong to which genes. The model relies on three fundamental biological rules:
+
+#### 1. Accessibility within the entire gene body
+* **The Concept:** Traditional models only looked at the promoter (the region right before the gene starts). ArchR looks at the promoter *and* the entire coding sequence of the gene itself.
+* **The Biology:** When a gene is actively being transcribed, RNA Polymerase physically moves through the gene body, forcing the chromatin to open up. Therefore, a high concentration of ATAC-seq reads spanning the entire length of a gene is a massive biological indicator that the gene is turned "on."
+
+#### 2. Exponential weighting of distal regulatory elements
+* **The Concept:** ArchR includes peaks that are located far away from the gene (distal elements), but it applies a "distance penalty." 
+* **The Biology:** Distal elements are **enhancers**. Because DNA exists in 3D space, an enhancer can fold over to touch a promoter. However, the further away an enhancer is on the linear DNA strand, the less likely it is to interact with that specific gene. 
+* **The Math:** ArchR uses an *exponential decay* function. An open peak 10 kilobases (kb) away from the *PITX2* promoter will add a significant amount to the *PITX2* Gene Score. A peak 100 kb away will add a much smaller fraction. A peak 500 kb away will add almost nothing.
+
+
+
+#### 3. Imposed gene boundaries
+* **The Concept:** ArchR prevents enhancers from "jumping" over neighboring genes to artificially inflate a Gene Score.
+* **The Biology:** The genome is organized into insulated neighborhoods (Topologically Associating Domains, or TADs). Enhancers are generally restricted to acting upon the genes within their own neighborhood. If ArchR sees an enhancer, it looks for the closest gene. If there is another gene sitting *between* the enhancer and your target gene, ArchR assumes the enhancer belongs to the neighbor, establishing a "boundary" that blocks the signal.
+* **Why it matters:** This drastically reduces false positives. Without these boundaries, a massive enhancer for a cardiac muscle gene might accidentally inflate the Gene Score of an unrelated neighboring gene.
+
+> **Thesis Tip:** When discussing your Variant Effect Prediction methodology, explicitly mention that you utilized ArchR's distance-weighted, boundary-imposed Gene Score model. This demonstrates to your committee that your mapping of non-coding AF variants to target genes accounts for the complex 3D folding and boundary insulation of the human genome, rather than just simple linear proximity.
+
+## 9.2 Identification of Marker Feautures
+
+![alt text](image-27.png)
+
+
+
+After calculating UMAPs and establishing your clusters, you are left with mathematical groupings of cells (e.g., Cluster 1, Cluster 2). To turn these abstract numbers into biological cell types (e.g., Left Atrial Cardiomyocytes, Fibroblasts, Macrophages), you must identify **Marker Features**.
+
+A marker feature is any biological metric (a Gene Score, a specific ATAC-seq peak, or a Transcription Factor motif) that is uniquely accessible in one specific cluster compared to the rest of the dataset.
+
+#### 1. The scATAC-seq Bias Problem
+Finding markers in scATAC-seq is notoriously tricky due to technical noise. If Cluster A simply has a higher sequencing depth (more fragments per cell) than Cluster B, a naive statistical test will tell you that *every* gene is a marker for Cluster A, purely because there is more data there.
+
+#### 2. ArchR's Solution: Bias-Matched Backgrounds
+ArchR overcomes this using a highly robust algorithm within the `getMarkerFeatures()` function. When testing if a gene is a marker for Cluster 1, ArchR does not just compare Cluster 1 to all other cells. Instead, it carefully selects a "background" group of cells from the other clusters that perfectly match the cells in Cluster 1 based on two critical quality metrics:
+* **TSS Enrichment** (Signal-to-noise ratio)
+* **log10(nFrags)** (Sequencing depth)
+
+By matching these biases, ArchR ensures that the markers it finds are driven by true biological differences, not technical artifacts.
+
+#### 3. Executing the Marker Search
+For your initial cell type annotation, you will want to find marker **Gene Scores**. This function performs a Wilcoxon rank-sum test to identify genes that are significantly more accessible in each cluster.
+
+```r
+# Identify marker Gene Scores for all clusters
+markersGS <- getMarkerFeatures(
+    ArchRProj = projHeme2, 
+    useMatrix = "GeneScoreMatrix", #We use "GeneScoreMatrix" first to find marker genes. Later, you can change this to "PeakMatrix" to find marker enhancers.
+    groupBy = "Clusters", #The metadata column containing your groups. Usually "Clusters".
+    bias = c("TSSEnrichment", "log10(nFrags)"), #The technical metrics ArchR must control for to prevent false positives.
+    testMethod = "wilcoxon"
+)
+```
+
+#### 4. Visualitzing the Markers
+
+* __Heatmaps__
+
+The output of `getMarkerFeatures()` is a massive matrix of p-values and Fold Changes. The best way to view the top markers across all clusters simultaneously is a __Marker Heatmap__. 
+```r 
+# Extract the top 40 marker genes per cluster
+markerList <- getMarkers(markersGS, cutOff = "FDR <= 0.01 & Log2FC >= 1.25")
+
+# Generate the Heatmap
+heatmapGS <- plotMarkerHeatmap(
+  seMarker = markersGS, 
+  cutOff = "FDR <= 0.01 & Log2FC >= 1.25", 
+  nLabel = 3, # Labels the top 3 genes per cluster on the y-axis
+  transpose = TRUE
+)
+
+# Draw the plot
+ComplexHeatmap::draw(heatmapGS, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+```
+
+![alt text](image-29.png)
+### 10.1 Interpreting the Marker Gene Heatmap
+
+The marker gene heatmap is essentially the "decoder ring" for your scATAC-seq dataset. It takes the abstract mathematical clusters from your UMAP and assigns them concrete biological identities based on the accessibility of known regulatory genes.
+
+Here is a detailed breakdown of how to read this specific plot and what it reveals about your blood and bone marrow cells.
+
+#### 1. Understanding the Plot Anatomy
+* **The Rows (C1 - C14):** Each row represents one of the 14 clusters ArchR identified in your dataset.
+* **The Columns (2645 features):** Each thin vertical line is a specific gene that passed your statistical threshold (`FDR <= 0.01 & Log2FC >= 1.25`). 
+* **The Color Scale (Z-Scores):** The heatmap does not show absolute expression; it shows *relative* accessibility across clusters. 
+    * **Yellow (+2):** This gene's chromatin is highly open/accessible in this specific cluster compared to the average.
+    * **Blue (-2):** This gene's chromatin is closed/inaccessible in this cluster.
+* **The Labels (Top):** ArchR looks at your custom `markerGenes` list and places a text label above the specific column where that gene is plotted.
+
+#### 2. Biological Annotation of Your Clusters
+By matching the bright yellow "blocks" to the labels at the top, we can confidently assign cell types to your clusters:
+
+* **The B-Cell Lineage (Clusters 12, 13, 14):** Look at the labels for **EBF1, MS4A1, PAX5, and MME**. Directly below these labels, you see a massive block of bright yellow exclusively in rows C12, C13, and C14. This perfectly confirms that these clusters represent your B-cell populations.
+* **The T-Cell Lineage (Clusters 8, 9, 10, 11):** The T-cell markers are split, which reveals sub-types! **CD3D and IL7R** (often associated with naive or helper T-cells) are highly accessible in C8, C9, and C10. However, **TBX21 and CD8A** (markers for cytotoxic CD8+ T-cells) light up brightly in C11.
+* **The Erythroid Lineage (Clusters 6, 7):**
+  **GATA1**, a master transcription factor for red blood cell development, shows strong accessibility in C6 and C7.
+* **The Myeloid/Monocyte Lineage (Clusters 4, 5):**
+  **MPO** (Myeloperoxidase), a classic myeloid/granulocyte marker, is highly enriched in C4 and C5.
+
+#### 3. Troubleshooting Missing Labels
+You might notice that some genes from your R code (like `CD34`, `CD14`, `IRF8`) are missing from the top of the heatmap. 
+
+**Why does this happen?**
+1. **Statistical Cutoff:** A gene is only plotted if it passes the `cutOff = "FDR <= 0.01 & Log2FC >= 1.25"` threshold in *at least one* cluster. If `CD14` didn't meet this strict fold-change requirement, ArchR drops it from this specific plot to prevent visualizing statistical noise.
+2. **Visual Overlap:** Sometimes, if two marker genes are located right next to each other in the matrix, ArchR drops one label to prevent the text from overlapping and becoming unreadable.
+
+**The Solution:** Notice the large, unlabelled bright yellow blocks in **C1, C2, and C3**. Given your input list, these are highly likely your `CD34+` Early Progenitors. To prove this, you can generate a specific UMAP colored by the `CD34` Gene Score (just like we did earlier for CD14) to visually confirm its presence, bypassing the strict cutoff of the heatmap.
+
+> **Thesis Tip:** In your final manuscript, this heatmap is the definitive proof of your cell typing. You will state: "Clusters were annotated based on the differential accessibility of canonical lineage markers (Fig X). For example, clusters 12-14 were annotated as B-cells due to significant enrichment of *MS4A1* and *PAX5* gene scores."
+
+### __Volcano Plots__
+
+If you want to focus deeply on a single cluster (for example, proving that Cluster 5 is your Left Atrial Cardiomyocyte population), you use a Volcano Plot. This plots every gene based on its Fold Change (x-axis) and its statistical significance (y-axis).
+```r
+# Plot a Volcano plot specifically for Cluster 5
+p <- plotMarkers(
+    seMarker = markersGS, 
+    name = "C5", 
+    cutOff = "FDR <= 0.01 & Log2FC >= 1", 
+    plotAs = "MA" # Can be "MA" or "Volcano"
+)
+p
+```
+![alt text](image-28.png)
+
+> **Thesis Tip:** In your AFib project, you will heavily rely on getMarkerFeatures(). First, you will use it with the GeneScoreMatrix to confirm which clusters are LA, RA, LV, and RV cardiomyocytes. Later, you will run this exact same function but group your cells by Disease State (e.g., AFib vs. Healthy) and use the PeakMatrix to find the specific enhancer peaks that structurally remodel during the disease!
+
+### 9.4 Visualizing Marker Genes on an Embedding
+
+While the Marker Gene Heatmap provides a fantastic global overview of all clusters at once, it abstracts away the relationships between the cells. To fully validate your cluster annotations and observe developmental trajectories, you must project these marker genes directly back onto your 2D UMAP.
+
+This allows you to see not just *if* a gene is active in a cluster, but *how* it is active. Does it turn on suddenly, or does it gradually increase in accessibility along a continuous biological trajectory?
+
+#### 1. Generating Multiple Marker UMAPs
+Instead of plotting one gene at a time, ArchR allows you to pass your entire list of marker genes into the `plotEmbedding()` function. This will generate a list of UMAP plots—one for each gene—colored by its Gene Score.
+
+```r
+# Define the specific marker genes of interest
+markerGenes <- c(
+  "CD34", # Early Progenitor
+  "GATA1", # Erythroid
+  "PAX5", "MS4A1", "EBF1", "MME", # B-Cell Trajectory
+  "CD14", "CEBPB", "MPO", # Monocytes
+  "IRF8", 
+  "CD3D", "CD8A", "TBX21", "IL7R" # TCells
+)
+
+# Generate a list of UMAP plots colored by GeneScoreMatrix
+p <- plotEmbedding(
+    ArchRProj = projHeme2, 
+    colorBy = "GeneScoreMatrix", 
+    name = markerGenes, 
+    embedding = "UMAP",
+    quantCut = c(0.01, 0.95) # Scales the color gradient
+    imputeWeights = NULL
+)
+
+# To plot a specific gene, we can subset this plot list:
+p$GATA1
+
+# To plot all genes we can use `cowplot`to arrange the various marker genes into a single plot.
+p2 <- lapply(p, function(x){
+    x + guides(color = FALSE, fill = FALSE) + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    theme(
+        axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank(), 
+        axis.text.y=element_blank(), 
+        axis.ticks.y=element_blank()
+    )
+})
+do.call(cowplot::plot_grid, c(list(ncol = 3),p2))
+```
+
+#### Interpreting the CowPlot
+  
+  "C:\Users\marko\OneDrive - Universität Graz\Dokumente\Uni\Masterarbeit\Plots ArchR Tutorial\Plot_UMAP_Marker_Genes_WO_Imputation.pdf"
+
+By overlaying the Gene Scores of specific markers directly onto your UMAP, you effectively create a biological map of your data. The cowplot grid you generated allows us to visually trace the exact developmental lineages and validate the identities of the discrete "islands" and "continuums" we saw in the clustering phase.
+
+Here is the detailed interpretation of your multi-panel UMAP to include in your thesis results.
+
+#### 1. The Progenitor Root (CD34)
+* **Visual Signature:** *CD34* is heavily enriched at the very top of the large, interconnected continuum on the right side of the UMAP.
+* **Biological Meaning:** CD34 is a classic marker for Hematopoietic Stem Cells (HSCs) and multipotent progenitors. Because it lights up exactly at the "apex" of the interconnected mass, we can definitively establish this top-right region as the root of your developmental trajectories. All other myeloid and erythroid cells branch out from this point.
+
+#### 2. The Erythroid Branch (GATA1)
+* **Visual Signature:** Moving slightly down and to the left from the CD34+ root, *GATA1* lights up in a distinct offshoot branch of the main continuum.
+* **Biological Meaning:** GATA1 is the master transcription factor for red blood cell (erythrocyte) and megakaryocyte development. This shows a clear developmental fork: some progenitor cells are moving away from the main trunk to commit to the erythroid lineage.
+
+#### 3. The Myeloid / Monocyte Trajectory (MPO & CD14)
+* **Visual Signature:** If you follow the main trunk down from the CD34+ root, it forms a long, vertical tail. *MPO* (Myeloperoxidase) lights up brightly in the middle of this tail. *CD14* lights up intensely at the very bottom tip of this tail.
+* **Biological Meaning:** This beautifully visualizes continuous cell differentiation! The cells flow from stem cells (CD34+), mature into early myeloid/granulocyte progenitors (MPO+ in the middle), and finally terminally differentiate into mature monocytes (CD14+) at the bottom.
+
+#### 4. The B-Cell Island (PAX5, MS4A1, MME)
+* **Visual Signature:** These three markers completely illuminate the detached island located at the top of the UMAP space. 
+* **Biological Meaning:** * *PAX5* is a master B-cell lineage transcription factor.
+    * *MS4A1* encodes the CD20 protein (the target of the drug Rituximab), marking mature B-cells.
+    * *MME* encodes CD10, often marking early/pre-B cells.
+    * Because this island is physically separated from the main CD34+ continuum, it indicates these are fully committed, mature cells circulating in the blood or bone marrow, distinct from the active myeloid differentiation happening on the right.
+
+#### 5. The T-Cell Island (CD3D & CD8A)
+* **Visual Signature:** *CD3D* lights up the entirety of the large, detached island on the far left. *CD8A* only lights up the bottom-right portion of that exact same island.
+* **Biological Meaning:** This demonstrates ArchR's ability to capture both broad lineages and specific sub-types. *CD3D* is a pan-T-cell marker, confirming the entire left island consists of T-lymphocytes. *CD8A* highlights the specific spatial territory within that island occupied by Cytotoxic (CD8+) T-cells, leaving the dark regions to likely represent CD4+ Helper T-cells.
+
+> **Thesis Tip:** When writing your figure legend for this cowplot, emphasize the spatial dynamics. Use phrasing such as: *"Feature plots of inferred gene activity demonstrate clear developmental trajectories. Stem cell marker CD34 localizes to the apex of the central continuum, which bifurcates into a GATA1+ erythroid branch and an MPO+/CD14+ myeloid differentiation axis. Lymphoid lineages form distinct, terminally differentiated clusters expressing canonical T-cell (CD3D+) and B-cell (MS4A1+) markers."* This clearly demonstrates your mastery of how spatial UMAP positioning reflects underlying cardiovascular and hematopoietic biology.
+
+### 9.5 Marker Genes Imputation with MAGIC
+
+In the previous section, you may have noticed that the UMAPs colored by Gene Scores look a bit "grainy." Some cells in the middle of a clear cluster might be dark (showing a score of 0), even though we know biologically they should be expressing that marker. This brings us to the biggest technical hurdle in scATAC-seq: **Data Sparsity**.
+
+#### 1. The Sparsity Problem
+scATAC-seq data is notoriously sparse, suffering heavily from "dropouts." A dropout occurs when a region of chromatin is genuinely open in a cell, but the sequencing machine simply failed to capture that specific DNA fragment by chance. Because we only have two copies of DNA per cell, missing just one or two fragments can completely wipe out the Gene Score for that cell.
+
+#### 2. The Solution: MAGIC Imputation
+To fix this visual noise, ArchR integrates **MAGIC** (Markov Affinity-based Graph Imputation of Cells). 
+
+
+
+MAGIC works by looking at the cell's "neighborhood." If a single cell has a Gene Score of 0 for *CD14*, but the algorithm sees that its 30 closest neighbors (based on the overall LSI dimensions) all have extremely high *CD14* scores, MAGIC assumes the 0 is a technical dropout. It "borrows" the signal from the neighbors to smooth out and impute the missing value.
+
+#### 3. Implementing MAGIC in ArchR
+Adding MAGIC weights is computationally straightforward. ArchR calculates the diffusion matrix and stores the imputation weights directly in the project object.
+
+```r
+# Calculate and add MAGIC imputation weights to your project
+projHeme2 <- addImputeWeights(ArchRProj = projHeme2)
+```
+
+#### 4. Visualizing Imputed Gene Scores
+```r
+#Plot the marker genes WITH MAGIC Imputation
+p_imputed <- plotEmbedding(
+    ArchRProj = projHeme2, 
+    colorBy = "GeneScoreMatrix", 
+    name = markerGenes, 
+    embedding = "UMAP",
+    imputeWeights = getImputeWeights(projHeme2) # This applies the smoothing!
+)
+
+# Save the smoothed plots to a new PDF
+plotPDF(plotList = p_imputed, 
+        name = "Plot-UMAP-Marker-Genes-W-Imputation.pdf", 
+        ArchRProj = projHeme2, 
+        addDOC = FALSE, 
+        width = 5, 
+        height = 5)
+```
+#### Important Caveats
+
+MAGIC is a Visualization Tool, Not Ground Truth!
+While MAGIC makes UMAPs look beautiful and makes developmental trajectories incredibly clear, you must be careful how you use it in your Atrial Fibrillation (AF) thesis.
+
+* Use it for: Generating clean figures for your manuscript, confirming cluster annotations, and visually demonstrating continuous lineage trajectories.
+
+* Do NOT use it for: Differential accessibility testing or your Variant Effect Prediction models. Because MAGIC forces neighbors to look similar, it artificially destroys biological variance and will create massive false-positive p-values if you run statistics on the imputed numbers. Always perform your core statistical tests (like `getMarkerFeatures()`) on the raw, un-imputed data.
+
+* Thesis Tip: A great supplementary figure for your thesis would be a side-by-side comparison. Show a specific marker gene (like PITX2 for the left atrium) plotted without imputation (showing the raw, sparse reality) right next to the plot with MAGIC imputation (showing the smoothed, biological consensus). This demonstrates transparency in your bioinformatics methodology.

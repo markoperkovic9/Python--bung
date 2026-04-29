@@ -69,3 +69,137 @@ This plan is designed to bridge your computational skills in ArchR with the deep
 * **Action Items:**
     * [ ] Read about how single nucleotide variants disrupt TF binding motifs.
     * [ ] Familiarize yourself with the concepts behind deep learning models used for VEP (like BPNet, Enformer, or ChromBPNet) which predict how a specific DNA sequence change will alter the ATAC-seq signal.
+
+
+# 9.0 Gene Scores and Marker Genes: The Biological Background
+
+To effectively analyze your Atrial Fibrillation (AF) scATAC-seq dataset, you must translate raw chromatin accessibility peaks into biologically meaningful units: **genes**. Because you are working purely with DNA accessibility (not RNA transcripts), understanding how ArchR bridges this gap is fundamental to interpreting your cardiomyocyte clusters and mapping variant effects.
+
+### 1. The scATAC-seq Challenge: We Don't Measure RNA
+In a standard scRNA-seq experiment, you directly count the mRNA transcripts produced by a cell to determine which genes are turned "on." In scATAC-seq, you do not measure RNA. Instead, you measure the physical "openness" of the chromatin. 
+
+While open chromatin is a prerequisite for transcription, it is not a direct 1:1 measurement of it. A region might be open because a transcription factor is bound, but the gene isn't actively firing yet (a "poised" state). Therefore, we must *infer* gene expression based on the epigenomic landscape.
+
+### 2. What is a "Gene Score"?
+A **Gene Score** (or Gene Activity Score) is ArchR’s mathematical prediction of how highly expressed a gene is, based entirely on the surrounding open chromatin. 
+
+
+
+ArchR calculates this score by looking at a massive genomic window around every gene and summing the ATAC-seq signal based on specific biological rules:
+* **The Promoter:** The region immediately upstream of the Transcription Start Site (TSS) is given the highest weight. If the promoter is closed, the gene is almost certainly off.
+* **The Gene Body:** Accessibility across the actual coding region of the gene is also heavily weighted, as open chromatin here indicates active transcription machinery moving through the DNA.
+* **Distal Enhancers (Distance-Weighted):** ArchR looks at open peaks far away from the gene (up to hundreds of kilobases). Because enhancers loop over to touch promoters in 3D space, open enhancers contribute to the Gene Score. ArchR uses a "distance decay" model, meaning a peak 10kb away contributes more to the score than a peak 100kb away.
+
+### 3. What is a "Marker Gene"?
+A **Marker Gene** is a gene whose high expression (and therefore, high Gene Score) uniquely defines a specific cell identity, anatomical region, or disease state. In your thesis, you will use marker genes to annotate your UMAP clusters.
+
+Since you are comparing different regions of the heart, you must rely on region-specific cardiomyocyte (CM) markers:
+* **Pan-Cardiomyocyte Markers:** *TNNT2*, *MYH6*. If a cluster has high gene scores for these, it is a CM (not a fibroblast or endothelial cell).
+* **Atrial Markers:** *NPPA*, *MYL4*. 
+* **Left-Atrium Specific:** *PITX2* (This is the most critical marker for your AF thesis, as *PITX2* defines left-atrial identity).
+* **Ventricular Markers:** *MYL2*, *MYH7*. 
+
+When you plot the Gene Score of *MYL2* on your UMAP, it will "light up" the ventricular clusters and remain dark in the atrial clusters.
+
+### 4. Relevance to Atrial Fibrillation (AF) Pathophysiology
+During Atrial Fibrillation, the atria undergo massive electrical and structural remodeling. This means the epigenetic landscape changes, and consequently, the Gene Scores will shift.
+
+* **Fetal Gene Program:** Stressed cardiomyocytes often revert to a fetal state. You may see AF clusters showing high Gene Scores for fetal markers (*NPPA*, *NPPB*) compared to healthy tissue.
+* **Ion Channel Remodeling:** You can use Gene Scores to investigate whether the chromatin around key potassium and sodium channels (like *KCNQ1* or *SCN5A*) closes during AF, leading to the electrical chaos characteristic of the disease.
+
+### 5. Connecting to Variant Effect Prediction (VEP)
+This is the core of your thesis. Why do we care about Gene Scores when looking at genetic variants?
+
+GWAS studies have identified hundreds of single nucleotide polymorphisms (SNPs) associated with AF. Over 90% of these sit in non-coding enhancers, not in the genes themselves. 
+1. **The Problem:** If a SNP sits in an enhancer in the middle of nowhere, how do you know which gene it causes to malfunction?
+2. **The ArchR Solution:** Because ArchR's Gene Scores incorporate distal enhancers into their calculations, you can mathematically link an enhancer peak to a specific gene's promoter. 
+3. **Variant Effect Prediction:** If an AF patient has a mutation in an enhancer, your predictive model will try to determine if that mutation destroys a Transcription Factor binding site. If it does, the enhancer closes. Because the enhancer closes, the **Gene Score** for the linked target gene (e.g., *PITX2*) drops. This mechanical chain of events is what you are predicting.
+
+> **Thesis Application:** In your analysis pipeline, you will first use well-established Marker Genes to confidently label your LA, RA, LV, and RV cardiomyocyte clusters. Once the identities are locked in, you will calculate Gene Scores across the entire genome to find out which specific genes are epigenetically silenced or activated during Atrial Fibrillation.
+
+
+## 9.1 Inspecting Marker Genes in a Genome Browser: The Case of TNNT2
+
+When you look at a specific gene like *TNNT2* (Cardiac Troponin T2) in a genome browser (such as the UCSC Genome Browser or using ArchR’s native `plotBrowserTrack` function), you are transitioning from global cluster metrics down to the absolute molecular truth of your data. 
+
+For your thesis on cardiomyocyte chromatin accessibility and Variant Effect Prediction (VEP), *TNNT2* serves as your ultimate "anchor" or positive control. Here is exactly what information is important when viewing this gene locus.
+
+#### 1. Validating Pan-Cardiomyocyte Identity
+*TNNT2* encodes a foundational structural protein of the cardiac sarcomere. It is constitutively expressed in almost all healthy cardiomyocytes.
+* **What to look for:** When you stack the ATAC-seq tracks for your Left Atrium (LA), Right Atrium (RA), Left Ventricle (LV), and Right Ventricle (RV) clusters, you should see a **massive, shared peak** directly over the *TNNT2* Transcription Start Site (TSS). 
+* **The Takeaway:** If a cluster lacks a peak at the *TNNT2* promoter, it is likely a non-myocyte (e.g., a cardiac fibroblast, endothelial cell, or macrophage). *TNNT2* proves you are actually looking at heart muscle cells.
+
+#### 2. Identifying Cis-Regulatory Elements (Enhancers)
+While the promoter peak is obvious, the real power of scATAC-seq for variant prediction lies in the non-coding regions.
+* **What to look for:** Look upstream, downstream, and within the introns of the *TNNT2* gene body for smaller, distinct peaks of accessibility. These are your putative enhancers.
+* **The Takeaway:** These enhancer peaks tell you exactly where transcription factors (like MEF2C, GATA4, or TBX5) are binding to keep *TNNT2* turned on. In ArchR, you can eventually calculate "Peak-to-Gene Links" which will draw physical loops on the browser track connecting these distant enhancer peaks directly to the *TNNT2* promoter.
+
+#### 3. Disease Context: Structural Remodeling in AF
+Atrial Fibrillation is not just an electrical disease; it causes structural remodeling of the atria, often altering how sarcomere proteins are expressed.
+* **What to look for:** Compare the *TNNT2* tracks of healthy LA/RA versus AF LA/RA. Are there new enhancer peaks appearing in the AF samples? Are certain intronic peaks closing?
+* **The Takeaway:** While *TNNT2* expression doesn't disappear in AF, the *regulatory network* keeping it on might shift. If the heart is under stress, it may rely on different stress-responsive enhancers to maintain sarcomere function.
+
+#### 4. Variant Effect Prediction (VEP) and Cardiomyopathies
+*TNNT2* is a classic cardiomyopathy gene. Mutations in the coding sequence cause Hypertrophic Cardiomyopathy (HCM) and Dilated Cardiomyopathy (DCM)—conditions that physically stretch the atria and strongly predispose a patient to Atrial Fibrillation.
+* **What to look for:** In your UCSC browser (or ArchR tracks), you can overlay a track of known GWAS SNPs for AF or Cardiomyopathy. 
+* **The Takeaway:** If you find a non-coding SNP that perfectly intersects with an intronic *TNNT2* ATAC-seq peak in your atrial cells, you have found a potential regulatory variant. Your VEP model would then test if that specific SNP destroys a transcription factor binding motif, thereby altering *TNNT2* expression and contributing to the structural remodeling seen in AF.
+
+> **Thesis Tip:** Generate a `plotBrowserTrack` in ArchR for *TNNT2* showing your LA, RA, LV, and RV clusters stacked vertically. Use this figure in your thesis to visually prove to the reader that your clustering successfully isolated highly pure cardiomyocytes across all four chambers of the heart before you began your AF variant analysis.
+>
+> ## 9.2 Navigating the UCSC Genome Browser: Interpreting the TNNT2 Locus
+
+https://genome.ucsc.edu/cgi-bin/hgTracks?db=hg38&lastVirtModeType=default&lastVirtModeExtraState=&virtModeType=default&virtMode=0&nonVirtPosition=&position=chr1%3A201359014%2D201377680&hgsid=3945198188_arEcFSonD3Ao3tTlrVk7gfLjsNV6
+
+When you open the UCSC Genome Browser to a specific coordinate window (like `chr1:201,359,014-201,377,680` for the *TNNT2* gene), you are looking at a stacked visual database of the human genome. For your variant effect prediction analysis, you will eventually export your ArchR scATAC-seq data as "BigWig" files and upload them directly onto this webpage. 
+
+Before you do that, you need to understand how to read the default tracks provided by UCSC.
+
+#### 1. The Gene Model Track (GENCODE / RefSeq Genes)
+This track is the blueprint of the gene itself.
+* **Thick Blocks:** These represent the **exons** (the coding regions that make up the actual Troponin protein).
+* **Thin Lines:** These represent the **introns** (the non-coding regions spliced out during RNA processing).
+* **Little Arrows (`> > >` or `< < <`):** These indicate the direction of transcription. If the arrows point left (`< < <`), the gene is on the negative strand, meaning the **promoter** is located at the far right end of the gene model. 
+* **Thesis Application:** You will look here to find the Transcription Start Site (TSS). You want to ensure your ATAC-seq data shows a massive peak exactly where transcription begins.
+
+#### 2. The Conservation Track (100 Vertebrates / PhastCons)
+This track shows how mathematically similar a DNA sequence is across different species (from humans to mice to zebrafish).
+* **High Peaks in Exons:** Expected, because changing the protein sequence is usually lethal to an organism.
+* **High Peaks in Introns or Empty Space:** This is the goldmine for epigeneticists. If a piece of non-coding DNA has been perfectly preserved for 100 million years of evolution, it is doing something incredibly important. 
+* **Thesis Application:** Highly conserved non-coding regions are almost always **Enhancers**. When you find an ATAC-seq peak in your cardiomyocytes, you can cross-reference it with this track. If your peak sits on top of a highly conserved region, you can be highly confident it is a functional cis-regulatory element.
+
+#### 3. The Variation Track (Common SNPs / dbSNP)
+This track places a vertical tick mark wherever a known genetic mutation exists in the human population.
+* **Thesis Application:** This track represents the "Variants" in your Variant Effect Prediction. Your goal is to find where the tick marks in this track overlap perfectly with the ATAC-seq peaks from your atrial clusters, specifically focusing on variants that have been flagged by GWAS for Atrial Fibrillation.
+
+#### 4. ENCODE Regulation Tracks (cCREs)
+The ENCODE project has pre-mapped candidate cis-Regulatory Elements across hundreds of tissue types.
+* **Red Blocks:** Promoters.
+* **Yellow/Orange Blocks:** Enhancers.
+* **Thesis Application:** You can use this as a reference map. If your scATAC-seq pipeline identifies a new peak in the Left Atrium during AF, you can check this track to see if ENCODE has already annotated it as a known enhancer in normal heart tissue, or if you have discovered a novel, disease-specific regulatory element.
+
+> **Thesis Tip:** A standard figure in an epigenetics thesis is a "Browser Shot." You take a screenshot of this exact UCSC view, but with your own ATAC-seq tracks stacked on top. Showing the *TNNT2* gene model, the conservation track, and your beautiful, clean cardiomyocyte ATAC-seq peaks all perfectly aligned is the ultimate proof of high-quality data.
+
+### 9.4 The Mechanism of Enhancer-Promoter Interaction
+
+It can be non-intuitive to think about a piece of DNA located 100,000 base pairs away controlling a gene. To understand how a distal enhancer affects a promoter, you have to stop thinking of DNA as a straight line and start thinking of it as a highly dynamic, 3D structure.
+
+#### 1. The 3D Genome and Chromatin Looping
+While an enhancer and a promoter might be vast distances apart on the linear genomic sequence, the DNA fiber is highly folded and packaged inside the nucleus. Through a process called **chromatin looping**, the DNA physically bends and folds, bringing the distal enhancer and the target promoter into direct, three-dimensional physical contact.
+
+
+
+#### 2. The Step-by-Step Mechanism
+The activation of a gene by a distal enhancer typically follows this sequence of molecular events:
+
+* **Step 1: Transcription Factor (TF) Binding:** Specific transcription factors recognize and bind to short DNA sequence motifs within the open chromatin of the enhancer. In your cardiomyocytes, this might involve core cardiac TFs like TBX5, GATA4, or NKX2-5 binding to an atrial-specific enhancer.
+* **Step 2: Recruitment of Co-activators:** The bound TFs recruit other proteins, such as chromatin remodelers (which keep the DNA accessible) and histone acetyltransferases (like p300). These enzymes chemically tag the nearby histones to officially mark the enhancer as "active."
+* **Step 3: The Looping Apparatus:** A ring-shaped protein complex called **Cohesin** helps extrude and stabilize the DNA loop. Simultaneously, a massive multi-protein complex called **Mediator** acts as a physical bridge. Mediator binds to the TFs stationed at the enhancer on one side, and reaches across to touch the promoter on the other side.
+* **Step 4: Activating the Promoter:** Once the enhancer is physically tethered to the promoter via the Mediator complex, it helps aggressively recruit and stabilize **RNA Polymerase II** and the general transcription machinery exactly at the Transcription Start Site (TSS).
+* **Step 5: Transcription Fires:** With the heavy machinery stabilized and energized by the enhancer loop, RNA Polymerase II effectively begins transcribing the gene into mRNA.
+
+#### 3. Why This Matters for Variant Effect Prediction (VEP)
+This 3D looping mechanism perfectly explains the core hypothesis of your thesis and why non-coding variants cause complex diseases like Atrial Fibrillation. 
+
+If a patient inherits a genetic mutation (even a single nucleotide change) right in the middle of a distal enhancer, it can alter the specific motif that a Transcription Factor uses to bind. If the DNA spelling is wrong, Step 1 fails. 
+
+If the TF cannot bind, the co-activators are never recruited, the Mediator complex doesn't attach, and the DNA loop fails to stabilize. The enhancer and promoter drift apart in 3D space, and RNA Polymerase II fails to reliably bind the promoter. The target gene (e.g., an ion channel or a structural protein) is under-expressed—not because the gene itself is mutated, but because its long-distance "switch" was fundamentally broken by a single variant.
