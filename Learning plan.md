@@ -203,3 +203,50 @@ This 3D looping mechanism perfectly explains the core hypothesis of your thesis 
 If a patient inherits a genetic mutation (even a single nucleotide change) right in the middle of a distal enhancer, it can alter the specific motif that a Transcription Factor uses to bind. If the DNA spelling is wrong, Step 1 fails. 
 
 If the TF cannot bind, the co-activators are never recruited, the Mediator complex doesn't attach, and the DNA loop fails to stabilize. The enhancer and promoter drift apart in 3D space, and RNA Polymerase II fails to reliably bind the promoter. The target gene (e.g., an ion channel or a structural protein) is under-expressed—not because the gene itself is mutated, but because its long-distance "switch" was fundamentally broken by a single variant.
+
+
+### 12.1.5 Clarifying Your Paths: Installation vs. Project Output
+
+It is important to distinguish between where the **software (MACS2)** is installed and where your **research data (ArchR Project)** is stored. One is the "tool," and the other is the "workbench."
+
+#### 1. Where should you install MACS2?
+When you use the command `pip install --user macs2`, it installs the software into a hidden folder in your home directory[cite: 3].
+
+*   **The Physical Location:** `/usr/people/BZEDVZ/.local/bin/macs2`
+*   **Why here?** This directory is specifically designed for HPC users to install software without needing "root" or administrative permissions[cite: 3].
+*   **Verification:** Once installed, you can find the exact path by typing `which macs2` in a terminal or `system("which macs2")` in your notebook[cite: 3].
+
+---
+
+#### 2. Is `/usr/people/BZEDVZ/18perkov/ArchR_Tutorial` a valid output directory?
+**Yes, this is a perfectly valid and highly recommended output directory.**
+
+In ArchR, the `outputDirectory` is the "home base" for your project[cite: 1]. Using an **absolute path** (one that starts with `/usr/` rather than just `ArchR_Tutorial`) is much safer on an HPC because it ensures the computer never gets "lost" if you run scripts from different subfolders[cite: 3].
+
+| Feature of your Path | Why it works for ArchR                                                                    |
+| :------------------- | :---------------------------------------------------------------------------------------- |
+| **Permissions**      | Since it is under your user ID (`BZEDVZ`), you have full read/write authority[cite: 3].   |
+| **Organization**     | It keeps your tutorial files separate from your main research data[cite: 1].              |
+| **Persistence**      | Unlike a `/tmp` folder, files here will not be deleted when your Slurm job ends[cite: 3]. |
+| **Structure**        | ArchR will create subfolders here for `ArrowFiles`, `Plots`, and `PeakCalls`[cite: 1].    |
+
+---
+
+#### 3. Putting it together in your code
+
+When you initialize your project or save it, you would use that path like this:
+```r
+# Setting the workbench (Where data goes)
+outDir <- "/usr/people/BZEDVZ/18perkov/ArchR_Tutorial"
+
+# Setting the tool (Where the engine lives)
+# This assumes you used 'pip install --user'
+pathToMacs2 <- "/usr/people/BZEDVZ/.local/bin/macs2"
+
+# Example: Adding peaks using both paths
+projHeme4 <- addReproduciblePeakSet(
+    ArchRProj = projHeme4, 
+    groupBy = "Clusters2", 
+    pathToMacs2 = pathToMacs2,
+    # ArchR automatically knows to save results into your outDir
+)
