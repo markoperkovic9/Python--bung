@@ -81,13 +81,13 @@ Source: Usually provided by the ENCODE project.
 
 ### Summary of Input File Types
 
-| File Type | Extension | Role |
-| :--- | :--- | :--- |
-| **Fragment File** | `.tsv.gz` | Primary data; contains Tn5 insertion sites per cell. |
-| **Index File** | `.tbi` | Required for fast random access to the fragment file. |
-| **BAM File** | `.bam` | Alternative primary data (aligned reads); slower to process. |
-| **Genome Reference** | `BSgenome` | Maps coordinates to a specific species (e.g., hg38, mm10). |
-| **Blacklist** | `.bed` / `GRanges` | Regions to ignore to reduce background noise. |
+| File Type            | Extension          | Role                                                         |
+| :------------------- | :----------------- | :----------------------------------------------------------- |
+| **Fragment File**    | `.tsv.gz`          | Primary data; contains Tn5 insertion sites per cell.         |
+| **Index File**       | `.tbi`             | Required for fast random access to the fragment file.        |
+| **BAM File**         | `.bam`             | Alternative primary data (aligned reads); slower to process. |
+| **Genome Reference** | `BSgenome`         | Maps coordinates to a specific species (e.g., hg38, mm10).   |
+| **Blacklist**        | `.bed` / `GRanges` | Regions to ignore to reduce background noise.                |
 
 
 ## 3.5 Setting the Seed (Reproducibility)
@@ -177,12 +177,12 @@ For your own actual thesis data, you will likely use hg38 (the current standard)
 This step converts raw fragment files into `.arrow` files. It is the "Quality Control" gatekeeper of the pipeline.
 
 ### Function Parameters:
-| Parameter | Value | Description |
-| :--- | :--- | :--- |
-| `minTSS` | 4 | Min. Transcription Start Site enrichment. Ensures high signal-to-noise ratio. |
-| `minFrags` | 1000 | Min. unique fragments per cell. Filters out "empty" or poorly sequenced cells. |
-| `addTileMat` | TRUE | Generates a 500-bp bin matrix for genome-wide accessibility. |
-| `addGeneScoreMat` | TRUE | Predicts gene expression based on local chromatin accessibility. |
+| Parameter         | Value | Description                                                                    |
+| :---------------- | :---- | :----------------------------------------------------------------------------- |
+| `minTSS`          | 4     | Min. Transcription Start Site enrichment. Ensures high signal-to-noise ratio.  |
+| `minFrags`        | 1000  | Min. unique fragments per cell. Filters out "empty" or poorly sequenced cells. |
+| `addTileMat`      | TRUE  | Generates a 500-bp bin matrix for genome-wide accessibility.                   |
+| `addGeneScoreMat` | TRUE  | Predicts gene expression based on local chromatin accessibility.               |
 
 ### Why 500-bp bins?
 ArchR uses a **"Base-pair Resolution"** approach but stores data in 500-bp tiles for computational efficiency. This provides a good balance between detail and speed for dimensionality reduction.
@@ -249,12 +249,12 @@ Because genomic DNA is wrapped around **nucleosomes** (~147 bp of DNA per wrap),
 
 ### 3.7.4 QC Summary Table 
 
-| Metric | Threshold | Indication of Quality |
-| :--- | :--- | :--- |
-| **Unique Fragments** | > 1,000 - 2,500 | Sufficient data depth for dimensionality reduction. |
-| **TSS Score** | > 4 (Ideal > 7) | High signal-to-noise ratio; healthy cells. |
-| **Nucleosomal Periodicity** | Visible Peaks | Integrity of chromatin structure is preserved. |
-| **Mitochondrial Rate** | < 10% | Effective cell lysis and high nuclear purity. |
+| Metric                      | Threshold       | Indication of Quality                               |
+| :-------------------------- | :-------------- | :-------------------------------------------------- |
+| **Unique Fragments**        | > 1,000 - 2,500 | Sufficient data depth for dimensionality reduction. |
+| **TSS Score**               | > 4 (Ideal > 7) | High signal-to-noise ratio; healthy cells.          |
+| **Nucleosomal Periodicity** | Visible Peaks   | Integrity of chromatin structure is preserved.      |
+| **Mitochondrial Rate**      | < 10%           | Effective cell lysis and high nuclear purity.       |
 
 > **Thesis Tip:** In your Methods section, explicitly state the thresholds used for `minTSS` and `minFrags`. These are often the first parameters a reviewer will check to validate your cell-filtering strategy.
 
@@ -427,11 +427,11 @@ proj <- addDoubletScores(
 
 
 #### Configuration Parameters
-| Parameter | Setting | Description |
-| :--- | :--- | :--- |
-| `k` | 10 | Number of neighbors for score calculation. |
-| `knnMethod` | "UMAP" | Embedding space used for neighbor search. |
-| `LSIMethod` | 1 | LSI projection version. |
+| Parameter   | Setting | Description                                |
+| :---------- | :------ | :----------------------------------------- |
+| `k`         | 10      | Number of neighbors for score calculation. |
+| `knnMethod` | "UMAP"  | Embedding space used for neighbor search.  |
+| `LSIMethod` | 1       | LSI projection version.                    |
 
 #### HPC Log Interpretation
 * **Reading Fragments:** ArchR is pulling data from disk.
@@ -471,11 +471,11 @@ proj <- addDoubletScores(
 
 After running `addDoubletScores()`, ArchR populates the `QualityControl` folder with three key visualizations per sample. These plots confirm whether the "Synthetic Doublet" bridges align with the intermediate cells in your actual data.
 
-| Plot Type | Metric | Primary Use |
-| :--- | :--- | :--- |
+| Plot Type              | Metric                        | Primary Use                                                       |
+| :--------------------- | :---------------------------- | :---------------------------------------------------------------- |
 | **Doublet Enrichment** | Relative density vs. expected | **Primary metric** used for doublet identification and filtering. |
-| **Doublet Scores** | $-\log_{10}(\text{p-adj})$ | Statistical significance; used as a secondary validation. |
-| **Doublet Density** | Projection density | Visualizes where the "synthetic" artifacts are located. |
+| **Doublet Scores**     | $-\log_{10}(\text{p-adj})$    | Statistical significance; used as a secondary validation.         |
+| **Doublet Density**    | Projection density            | Visualizes where the "synthetic" artifacts are located.           |
 
 #### Representative Visualizations (BMMC Sample)
 
@@ -511,11 +511,11 @@ Integrating `demuxlet` allows you to validate ArchR's computational `DoubletEnri
 2. **Import results:** Use `addCellColData()` to add the assignments to your `ArchRProject`.
 3. **Compare:** Plot the `DoubletEnrichment` scores and color them by the `Demuxlet` assignment to see if the "bridges" align with the known doublets.
 
-| Feature | ArchR Simulation | demuxlet |
-| :--- | :--- | :--- |
-| **Requirements** | scATAC-seq data only | Genotype (VCF) files + Mixed Donors |
-| **Primary Use** | Standard QC for any sample | Gold standard validation |
-| **Detects...** | Heterotypic doublets (bridges) | Doublets between different genotypes |
+| Feature          | ArchR Simulation               | demuxlet                             |
+| :--------------- | :----------------------------- | :----------------------------------- |
+| **Requirements** | scATAC-seq data only           | Genotype (VCF) files + Mixed Donors  |
+| **Primary Use**  | Standard QC for any sample     | Gold standard validation             |
+| **Detects...**   | Heterotypic doublets (bridges) | Doublets between different genotypes |
 
 > **Thesis Tip:** If your research uses donor pooling, showing a correlation between ArchR’s Doublet Scores and demuxlet’s assignments is a powerful way to prove your data's technical rigor.
 
@@ -623,20 +623,20 @@ summary(proj$nFrags)
 
 The `cellColData` object stores critical metadata for every individual cell in the project. The following table defines the columns calculated during Arrow file creation:
 
-| Column Name | Description |
-| :--- | :--- |
-| **TSSEnrichment** | The per-cell Transcription Start Site (TSS) enrichment score. |
-| **ReadsInTSS** | The number of reads that fall within TSS regions (default is 100 bp around TSS). |
-| **ReadsInPromoter** | The number of reads that fall in promoter regions (default is -2000 to +100 from the TSS). |
-| **PromoterRatio** | The ratio of reads in promoters to reads outside of promoters. |
-| **ReadsInBlacklist** | The number of reads that fall in defined genomic blacklist regions. |
-| **BlacklistRatio** | The ratio of reads in blacklist regions to reads outside of blacklist regions. |
-| **NucleosomeRatio** | Represents the ratio of reads mapping to nucleosome-sized fragments, calculated as: $(nDiFrags + nMultiFrags) / nMonoFrags$. |
-| **nFrags** | The total number of unique nuclear fragments recovered per cell. |
-| **nMonoFrags** | The number of fragments with a length less than $2 \times \text{nucLength}$ (where `nucLength` is 147 bp by default). |
-| **nDiFrags** | The number of fragments with a length $\geq 2 \times \text{nucLength}$ but $< 3 \times \text{nucLength}$. |
-| **nMultiFrags** | The number of fragments with a length $\geq 3 \times \text{nucLength}$. |
-| **PassQC** | Equal to $1$ if the cell passed initial QC filters or $0$ if it did not. |
+| Column Name          | Description                                                                                                                  |
+| :------------------- | :--------------------------------------------------------------------------------------------------------------------------- |
+| **TSSEnrichment**    | The per-cell Transcription Start Site (TSS) enrichment score.                                                                |
+| **ReadsInTSS**       | The number of reads that fall within TSS regions (default is 100 bp around TSS).                                             |
+| **ReadsInPromoter**  | The number of reads that fall in promoter regions (default is -2000 to +100 from the TSS).                                   |
+| **PromoterRatio**    | The ratio of reads in promoters to reads outside of promoters.                                                               |
+| **ReadsInBlacklist** | The number of reads that fall in defined genomic blacklist regions.                                                          |
+| **BlacklistRatio**   | The ratio of reads in blacklist regions to reads outside of blacklist regions.                                               |
+| **NucleosomeRatio**  | Represents the ratio of reads mapping to nucleosome-sized fragments, calculated as: $(nDiFrags + nMultiFrags) / nMonoFrags$. |
+| **nFrags**           | The total number of unique nuclear fragments recovered per cell.                                                             |
+| **nMonoFrags**       | The number of fragments with a length less than $2 \times \text{nucLength}$ (where `nucLength` is 147 bp by default).        |
+| **nDiFrags**         | The number of fragments with a length $\geq 2 \times \text{nucLength}$ but $< 3 \times \text{nucLength}$.                    |
+| **nMultiFrags**      | The number of fragments with a length $\geq 3 \times \text{nucLength}$.                                                      |
+| **PassQC**           | Equal to $1$ if the cell passed initial QC filters or $0$ if it did not.                                                     |
 
 ---
 
@@ -1228,18 +1228,18 @@ The `addIterativeLSI()` function is the primary tool in ArchR for dimensionality
 
 ### Configuration Table
 
-| Parameter           | Value            | Description                                                                                                                                                                 |
-| :------------------ | :--------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`ArchRProj`**     | `projHeme2`      | The **ArchRProject** object to which the dimensionality reduction will be added.                                                                                            |
-| **`useMatrix`**     | `"TileMatrix"`   | The input data matrix. Using the `TileMatrix` (500bp windows) allows for an unbiased initial pass before peaks are even called.                                             |
-| **`name`**          | `"IterativeLSI"` | The name given to this specific reduction. This allows you to store multiple runs (e.g., with different parameters) in the same project.                                    |
-| **`iterations`**    | `2`              | The number of times the LSI process is repeated. The first pass finds broad clusters; subsequent passes use features variable across those clusters to refine the results.  |
-| **`clusterParams`** | `list(...)`      | A list of parameters passed to the clustering algorithm (uses `Seurat::FindClusters`). These "internal" clusters are used to identify variable features between LSI rounds. |
-| **`resolution`**    | `0.2`            | The granularity of the internal clustering. Higher values lead to more clusters. For the first iteration, a low resolution is preferred to capture major cell lineages.     |
-| **`sampleCells`**   | `10000`          | The number of cells sampled to perform the "Estimated LSI" procedure. This allows the function to scale to millions of cells without crashing your RAM.                     |
-| **`n.start`**       | `10`             | The number of random starting points for the K-means clustering step, ensuring the identified clusters are stable.                                                          |
-| **`varFeatures`**   | `25000`          | The number of top "variable features" (tiles or peaks) used for the final LSI. These features drive the separation in your UMAP.                                            |
-| **`dimsToUse`**     | `1:30`           | The LSI dimensions (components) to be retained. Typically, the first 30 dimensions capture the majority of biological variance. __Biological Intuition:__ If your clusters don't make sense (e.g., they don't match known markers), you can manually override the algorithm. __Action:__ Change dimsToUse = 1:30 to dimsToUse = 2:30. This completely ignores the first dimension and forces the UMAP/Clustering to rely on the remaining, usually cleaner, dimensions.                                             |
+| Parameter           | Value            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| :------------------ | :--------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`ArchRProj`**     | `projHeme2`      | The **ArchRProject** object to which the dimensionality reduction will be added.                                                                                                                                                                                                                                                                                                                                                                                        |
+| **`useMatrix`**     | `"TileMatrix"`   | The input data matrix. Using the `TileMatrix` (500bp windows) allows for an unbiased initial pass before peaks are even called.                                                                                                                                                                                                                                                                                                                                         |
+| **`name`**          | `"IterativeLSI"` | The name given to this specific reduction. This allows you to store multiple runs (e.g., with different parameters) in the same project.                                                                                                                                                                                                                                                                                                                                |
+| **`iterations`**    | `2`              | The number of times the LSI process is repeated. The first pass finds broad clusters; subsequent passes use features variable across those clusters to refine the results.                                                                                                                                                                                                                                                                                              |
+| **`clusterParams`** | `list(...)`      | A list of parameters passed to the clustering algorithm (uses `Seurat::FindClusters`). These "internal" clusters are used to identify variable features between LSI rounds.                                                                                                                                                                                                                                                                                             |
+| **`resolution`**    | `0.2`            | The granularity of the internal clustering. Higher values lead to more clusters. For the first iteration, a low resolution is preferred to capture major cell lineages.                                                                                                                                                                                                                                                                                                 |
+| **`sampleCells`**   | `10000`          | The number of cells sampled to perform the "Estimated LSI" procedure. This allows the function to scale to millions of cells without crashing your RAM.                                                                                                                                                                                                                                                                                                                 |
+| **`n.start`**       | `10`             | The number of random starting points for the K-means clustering step, ensuring the identified clusters are stable.                                                                                                                                                                                                                                                                                                                                                      |
+| **`varFeatures`**   | `25000`          | The number of top "variable features" (tiles or peaks) used for the final LSI. These features drive the separation in your UMAP.                                                                                                                                                                                                                                                                                                                                        |
+| **`dimsToUse`**     | `1:30`           | The LSI dimensions (components) to be retained. Typically, the first 30 dimensions capture the majority of biological variance. __Biological Intuition:__ If your clusters don't make sense (e.g., they don't match known markers), you can manually override the algorithm. __Action:__ Change dimsToUse = 1:30 to dimsToUse = 2:30. This completely ignores the first dimension and forces the UMAP/Clustering to rely on the remaining, usually cleaner, dimensions. |
 
 ---
 
@@ -1277,11 +1277,11 @@ The `SampleName` plot confirms that the dimensionality reduction successfully ha
 
 ### Summary Table for Version 1
 
-| Metric                 | Observation          | Interpretation                                                                            |
-| :--------------------- | :------------------- | :---------------------------------------------------------------------------------------- |
-| **Cluster Count**      | 7 Clusters           | Identifies major cell populations; lacks sub-type resolution.               |
+| Metric                 | Observation          | Interpretation                                                                |
+| :--------------------- | :------------------- | :---------------------------------------------------------------------------- |
+| **Cluster Count**      | 7 Clusters           | Identifies major cell populations; lacks sub-type resolution.                 |
 | **Topology**           | Connected "Mass"     | High feature count (25k) preserves common signals, keeping clusters close.    |
-| **Integration**        | Well-mixed Red/Green | Strong batch correction between BMMC and PBMC samples[cite: 6, 8, 21].                    |
+| **Integration**        | Well-mixed Red/Green | Strong batch correction between BMMC and PBMC samples[cite: 6, 8, 21].        |
 | **Lineage Definition** | Broad Lineages       | Ideal for a first-pass analysis to verify data quality and major cell groups. |
 
 
@@ -1337,12 +1337,12 @@ The `SampleName` plot for Version 4 shows excellent integration, confirming that
 
 ### Comparison Summary: Version 1 vs. Version 4
 
-| Metric       | Version 1 (The Rough Draft)                        | Version 4 (The Final Map)                                         |
-| :----------- | :------------------------------------------------- | :---------------------------------------------------------------- |
-| **Topology** | Single, connected "cloud". | Two distinct, lineage-specific islands. |
-| **Clusters** | 7 Clusters (Broad) .      | 11 Clusters (High-resolution)].          |
-| **Noise**    | Higher (25k features).     | Lower (15k features); more specific.    |
-| **Use Case** | Quick verification of sample mixing.               | Deep discovery of sub-types and lineages.                         |
+| Metric       | Version 1 (The Rough Draft)          | Version 4 (The Final Map)                 |
+| :----------- | :----------------------------------- | :---------------------------------------- |
+| **Topology** | Single, connected "cloud".           | Two distinct, lineage-specific islands.   |
+| **Clusters** | 7 Clusters (Broad) .                 | 11 Clusters (High-resolution)].           |
+| **Noise**    | Higher (25k features).               | Lower (15k features); more specific.      |
+| **Use Case** | Quick verification of sample mixing. | Deep discovery of sub-types and lineages. |
 
 
 
@@ -2724,8 +2724,8 @@ By comparing these two side-by-side, you can answer critical biological question
 
 Here is the breakdown of the parameters for your guide:
 
-| Code Element / Parameter      | Technical Description                                                                             | Biological Purpose                                                                                                                                                                                 |
-| :---------------------------- | :------------------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Code Element / Parameter      | Technical Description                                                                    | Biological Purpose                                                                                                                                                                        |
+| :---------------------------- | :--------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `p2`                          | The variable storing the list of UMAP plots for the gene scores.                         | Allows you to keep these "ATAC-only" plots separate from your integrated RNA plots for comparison.                                                                                        |
 | `colorBy = "GeneScoreMatrix"` | Directs ArchR to use the inferred gene activity calculated from chromatin accessibility. | **The "Potential":** Visualizes what the cell is epigenetically *capable* of doing based on open DNA.                                                                                     |
 | `name = markerGenes`          | Uses the same list of canonical markers (CD34, GATA1, etc.).                             | Ensures you are comparing "apples to apples" when looking at the RNA-integrated plots.                                                                                                    |
@@ -2788,12 +2788,12 @@ do.call(cowplot::plot_grid, c(list(ncol = 3), p2c))
 
 ### Interpretin the differences between "Gene expression"(RNA-seq-derived) and "Gene score"(ATAC-seq-derived)
 
-| Biological Scenario     | Visual Pattern                                          | Interpretation                                                                                                                                                                                                    |
-| :---------------------- | :------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Biological Scenario     | Visual Pattern                                 | Interpretation                                                                                                                                                                                  |
+| :---------------------- | :--------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **High Correlation**    | High Gene Score **AND** High RNA expression.   | **Active State:** The gene is in a steady state. The chromatin is open, and the transcription machinery is actively producing mRNA.                                                             |
 | **Epigenetic Priming**  | High Gene Score **BUT** Low/No RNA expression. | **Poised State:** The cell has "unlocked" the DNA, but has not yet started transcribing. This often occurs in early disease stages where a cell is prepared to react but hasn't been triggered. |
-| **Transcriptional Lag** | Low Gene Score **BUT** High RNA expression.    | **Closing Window:** The chromatin may have begun to close or compact, but the mRNA transcripts produced earlier remain in the cytoplasm due to their longer half-life.                                   |
-| **Technical Sparsity**  | No signal in either, or "patchy" signal.       | **Dropout:** Since both assays are sparse, some low-abundance genes may be missed by the sequencing machine in one or both assays, even with imputation.                                                 |
+| **Transcriptional Lag** | Low Gene Score **BUT** High RNA expression.    | **Closing Window:** The chromatin may have begun to close or compact, but the mRNA transcripts produced earlier remain in the cytoplasm due to their longer half-life.                          |
+| **Technical Sparsity**  | No signal in either, or "patchy" signal.       | **Dropout:** Since both assays are sparse, some low-abundance genes may be missed by the sequencing machine in one or both assays, even with imputation.                                        |
 
 ## 10.3 Labeling scATAC-seq clusters with scRNA-seq information
 
@@ -2806,8 +2806,8 @@ cM <- confusionMatrix(projHeme3$Clusters, projHeme3$predictedGroup)
 labelOld <- rownames(cM)
 labelOld
 ```
-| Code Element               | Technical Description                                                                       | Purpose in the Pipeline                                                                                                             |
-| :------------------------- | :------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------- |
+| Code Element               | Technical Description                                                              | Purpose in the Pipeline                                                                                                    |
+| :------------------------- | :--------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------- |
 | `cM`                       | The output object, which is a contingency table (matrix) of frequencies.           | Provides the raw data needed to decide which biological label belongs to which ATAC cluster.                               |
 | `confusionMatrix()`        | An ArchR function that cross-tabulates two different sets of categorical labels.   | Quantifies the overlap between your chromatin-defined groups and your gene-expression-defined groups.                      |
 | `projHeme3$Clusters`       | The metadata column containing the original ATAC-seq cluster assignments.          | These are the "Old Labels" (e.g., C1, C2) that you are preparing to replace.                                               |
@@ -2821,8 +2821,8 @@ labelNew <- colnames(cM)[apply(cM, 1, which.max)]
 labelNew
 ```
 
-| Code Element        | Technical Description                                                                           | Purpose in the Pipeline                                                                                                |
-| :------------------ | :---------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| Code Element        | Technical Description                                                                  | Purpose in the Pipeline                                                                                       |
+| :------------------ | :------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------ |
 | `labelNew`          | A character vector containing the "majority" biological labels for every ATAC cluster. | Serves as the final mapping key to rename your clusters from numbers to biological identities.                |
 | `colnames(cM)`      | Retrieves the names of all the scRNA-seq cell types present in the integration.        | Provides the biological vocabulary (e.g., "Monocyte", "T-Cell") used to label the clusters.                   |
 | `apply(cM, 1, ...)` | Iterates through the confusion matrix row by row (dimension 1).                        | Ensures that every single ATAC cluster is evaluated individually for its best match.                          |
@@ -2836,8 +2836,8 @@ As you move deeper into your analysis, you will encounter a fundamental limitati
 
 #### 1. The "Why" Behind Pseudo-bulking
 
-| The Problem                                                                                                                                                       | The Solution                                                                                                                                                                                    |
-| :---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Problem                                                                                                                                              | The Solution                                                                                                                                                                           |
+| :------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Binary Constraints:** Individual cell loci are essentially $1$ (accessible) or $0$ (not accessible), which limits many types of mathematical analysis. | **Pseudo-bulk Aggregation:** By combining data from many similar cells, ArchR creates a "pseudo-sample" that mimics the high-quality signal of a traditional bulk ATAC-seq experiment. |
 | **Statistical Significance:** Robust science requires replicates to prove that an observation isn't just a random fluke.                                 | **Pseudo-bulk Replicates:** ArchR generates multiple pseudo-samples for each cell group, providing the replicates needed to calculate measurements of statistical significance.        |
 
@@ -2879,8 +2879,8 @@ projHeme4 <- addGroupCoverages(
     groupBy = "Clusters2"
 )
 ```
-| Parameter       | Technical Description                                                                  | Purpose in the Pipeline                                                                                                                         |
-| :-------------- | :------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Parameter       | Technical Description                                                         | Purpose in the Pipeline                                                                                                                |
+| :-------------- | :---------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------- |
 | **`ArchRProj`** | Your active ArchR project object (`projHeme3`).                               | Provides the source data and cell metadata for the operation.                                                                          |
 | **`groupBy`**   | The specific column in your `cellColData` used to define groupings.           | Tells ArchR which cells belong together (e.g., "all B-cells") to create the pseudo-bulk samples.                                       |
 | **`Clusters2`** | The metadata column containing the biological labels you assigned previously. | Ensures that your pseudo-bulk replicates are biologically meaningful (based on cell types) rather than just arbitrary cluster numbers. |
@@ -2916,8 +2916,8 @@ The description of `addGroupCoverages()` can sound a bit like a tongue-twister. 
 
 ### Why this matters for your Atrial Fibrillation Research
 
-| Process Phase           | Why it’s Essential                                                                                                                                                                |
-| :---------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Process Phase           | Why it’s Essential                                                                                                                                                       |
+| :---------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Cell Merging**        | Overcomes "Sparsity." It turns a few random dots into a visible "peak" at an important AFib gene like *NPPA*.                                                            |
 | **Replicate Splitting** | Provides "Statistical Power." It allows you to say: "The difference in this enhancer isn't just a fluke in one sample; it’s consistent across all my pseudo-replicates". |
 | **Single File Storage** | Enables "Computational Speed." It allows ArchR to quickly pull up the data for any cell type without opening and closing hundreds of different files.                    |
@@ -2927,3 +2927,332 @@ The description of `addGroupCoverages()` can sound a bit like a tongue-twister. 
 > **The "Bottom Line" Interpretation:** 
 > Think of `addGroupCoverages()` as an automated librarian. It takes a messy pile of thousands of individual pages (single cells), sorts them into chapters by topic (cell types), creates multiple copies of each chapter to check for errors (replicates), and then binds them all into one thick, organized book (the insertion coverage file).
 
+## 12.2 Understanding the Iterative Overlap Peak Calling (MACS2)
+
+This "iterative overlap" procedure is ArchR's way of ensuring your peak set isn't just a random collection of noise. It uses a two-stage filter to make sure the peaks you analyze for your heart research are statistically robust and comparable across different cell types.
+
+---
+
+#### Stage 1: Group-Specific Reproducibility
+In this first step, ArchR looks at each cell group (e.g., your "Atrial Cardiomyocytes") individually:
+
+*   **Replicate Verification**: ArchR uses the pseudobulk replicates (created in the previous step) to identify peaks that appear consistently across the replicates for that specific group.
+*   **Quantile Normalization**: It calculates a `replicateScoreQuantile`. This acts as a "leveling tool" to account for differences in the number of fragments or cells per group, ensuring a group with more data doesn't unfairly dominate the results.
+*   **File Storage**: These group-specific peak sets are saved as **GRanges** objects in the `PeakCalls` directory. The exact "summits" for each replicate are stored in the `ReplicateCalls` folder.
+
+---
+
+#### Stage 2: The "Union" Peak Set
+Once it has the winners for every group, ArchR merges them into one master list so you can compare "Apples to Apples" across your whole project:
+
+*   **Merging**: All group-specific peak sets are merged into a single **Union Peak Set**.
+*   **Final Ranking**: A `groupScoreQuantile` is assigned to show the peak's strength across the whole project.
+*   **The "Origin" Label**: Each peak gets a `GroupReplicate` annotation.
+*   **Important Caveat**: This label simply identifies which group had the **highest normalized significance** for that peak. It does *not* mean the peak is exclusive to that group; it just means that group "won" the ranking during the merging process.
+
+---
+
+#### Managing Your Peak Sets
+ArchR projects are designed to be streamlined, which leads to one strict rule: **An ArchRProject can only hold one peak set at a time**.
+
+If you want to experiment with different peak-calling strategies, you have two options:
+
+| Option        | Method                                                                     | Use Case                                                                                              |
+| :------------ | :------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------- |
+| **Option #1** | Use `saveArchRProject()` to create copies.                        | Best for keeping entirely different analysis branches separate.                              |
+| **Option #2** | Store sets as `GenomicRanges` and swap them using `addPeakSet()`. | Best for testing how different peak lists change your downstream results within one project. |
+
+---
+
+> **Peer Tip (The "Talent Show" Analogy):** 
+> Think of Stage 1 as local auditions where each cell type finds its best "talent" (peaks). Stage 2 is the national final where everyone is put into one big "supergroup" (the Union Set). The `GroupReplicate` tag is just a note of who the "star" was for that particular peak, even if other groups are "singing along" at that same genomic location.
+
+
+### 12.1.15 Breaking Down Your Master Peak Set
+
+The output of `getPeakSet(projHeme4)` is the "Holy Grail" of your current analysis. It is a **GRanges** object containing the final **Union Peak Set**—the filtered, normalized, and annotated list of all 145,956 genomic regions that ArchR deemed reliable across your heart data.
+
+---
+
+#### 1. The Core Coordinates
+*   **`seqnames`, `ranges`, `strand`**: These are the physical addresses of the peaks (e.g., `chr1:752514-753014`). Note that all peaks in ArchR are standardized to a fixed width (usually **500 bp**) centered on the peak summit to make statistical comparisons easier.
+
+
+
+#### 2. Statistical Metadata (The "Iterative Overlap" Results)
+These columns tell you how a peak survived the "Genomic Talent Show" we discussed earlier:
+
+| Column Name                  | What it Represents                                                                                                        |
+| :--------------------------- | :------------------------------------------------------------------------------------------------------------------------ |
+| **`score`**                  | The raw statistical significance from MACS2.                                                                     |
+| **`replicateScoreQuantile`** | How strong this peak was compared to others in its original **pseudobulk replicate**.                            |
+| **`groupScoreQuantile`**     | How strong this peak was compared to others in its **cell group** (e.g., Mono, B).                               |
+| **`Reproducibility`**        | The number of replicates in which this specific peak was found (e.g., `2` means it was seen in both replicates). |
+| **`GroupReplicate`**         | The specific group and replicate that "won" the peak during merging because it had the highest significance.     |
+
+#### 3. Biological Annotations
+ArchR automatically links your peaks to the nearest genes to help you interpret the Atrial Fibrillation biology:
+
+*   **`peakType`**: Classifies the peak's location relative to genes.
+    *   **Promoter**: Right at the start of a gene (usually within 2kb of a TSS).
+    *   **Intronic / Exonic**: Inside the gene body.
+    *   **Distal**: Far away from any known gene; these are often the "enhancers" that act as switches.
+*   **`nearestGene` / `nearestTSS`**: The symbol of the gene closest to this peak (e.g., *LINC01128* or *TMLHE*).
+*   **`distToTSS`**: The physical distance (in base pairs) to the nearest Transcription Start Site.
+
+---
+
+#### 4. Technical Metrics
+*   **`GC`**: The percentage of G and C nucleotides in the peak. This is important because GC-rich areas often sequence differently, and ArchR uses this to "correct" for technical bias later.
+*   **`idx`**: The internal index number for that specific peak within its group.
+
+---
+
+> **The "Big Picture" for Your Thesis:**
+> Look at the row labels (the very first column: `Mono`, `B`, `GMP`). These tell you which cell type "claims" that peak. For example, the peak at `chr1:762695-763195` was most significant in **B-cells**, is a **Promoter** peak, and is only 25 base pairs away from the gene ***LINC01128***. 
+
+**Notice how some peaks are labeled "Distal"? Those are the ones we'll want to check for AFib-specific enhancers later. Do you want to see how to filter this list for only "Promoter" peaks?**
+
+### 13.1.1 Understanding `getMarkers()`: DataFrame vs. GRanges
+
+The primary difference between the two commands in your Jupyter notebook is the **data structure** returned by the `returnGR` parameter. While both commands identify "Marker Features"—peaks that are statistically unique to a specific cell group—they package that information differently for your next analysis steps.
+
+---
+
+### Command 1: The Standard Table (`returnGR = FALSE`)
+In cell **[15]**, you are running the default version of the function.
+
+*   **Output Type**: A `DataFrame` (essentially a standard R table or "DFrame").
+*   **Structure**: The genomic coordinates (`seqnames`, `start`, `end`) are treated as regular columns alongside your statistics.
+*   **Best Use Case**: Use this when you want to **manually inspect** the results, print them in your notebook (as seen in cell [16]), or export the list to a `.csv` or Excel file for a supplemental table in your thesis.
+
+---
+
+### Command 2: The Genomic Object (`returnGR = TRUE`)
+In cell **[17]**, you have added the `returnGR = TRUE` argument.
+
+*   **Output Type**: A `GRanges` object (Genomic Ranges).
+*   **Structure**: The coordinates are "promoted" to the formal range component of the object, leaving only the statistics (`Log2FC`, `FDR`, `MeanDiff`) as metadata columns.
+*   **Best Use Case**: This is the "power user" format. You **must** use this if you plan to do any of the following within R:
+    *   **Overlapping**: Checking if these marker peaks overlap with specific GWAS variants for Atrial Fibrillation.
+    *   **Annotation**: Finding the nearest genes or promoters using Bioconductor tools.
+    *   **Visualization**: Plotting these peaks as "tracks" in a genome browser view.
+
+---
+
+### Comparison Summary
+
+| Feature            | `returnGR = FALSE` (Default)           | `returnGR = TRUE`                       |
+| :----------------- | :------------------------------------- | :-------------------------------------- |
+| **Data Format**    | `DataFrame`                            | `GRanges`                               |
+| **Spatial Info**   | Stored as text/numeric columns.        | Stored as a formal genomic coordinate.  |
+| **Readability**    | High (looks like a spreadsheet).       | Moderate (standardized genomic format). |
+| **Downstream Ops** | Limited to table manipulation.         | Full suite of genomic range operations. |
+| **Thesis Value**   | Great for "Table 1" or Appendix lists. | Required for advanced spatial plotting. |
+
+---
+
+### How this relates to your marker identification
+In both cases, ArchR is calculating which peaks are unique to your groupings, such as the **1,851 marker peaks** identified for the **Erythroid** cluster in your example. It is important to remember that these peaks aren't necessarily *only* found in Erythroid cells; rather, the Erythroid group showed the highest normalized significance for these specific regions during the "Iterative Overlap" process.
+
+> **Tutorial Tip:** If you are just starting to explore your markers, stay with the `DataFrame` (Command 1) to get a feel for the genes involved. Once you are ready to make high-quality publication plots or look for Transcription Factor motifs, switch to the `GRanges` (Command 2).
+
+Are you planning to export this list to a spreadsheet for manual review, or do you need to perform genomic overlaps with other datasets (like heart disease GWAS variants) next?
+
+### 13.2.1 Visualizing Identity: The Marker Peak Heatmap
+
+The `markerHeatmap()` function is designed to take the thousands of statistical results from your marker identification and turn them into a single, cohesive image that defines each cell type's regulatory signature.
+
+---
+
+### The Visualization Command
+```r
+# Generate the heatmap object
+heatmapPeaks <- markerHeatmap(
+  seMarker = markerPeaks, 
+  cutOff = "FDR <= 0.1 & Log2FC >= 0.5", 
+  transpose = TRUE
+)
+
+# Display the heatmap
+draw(heatmapPeaks)
+```
+
+| Parameter       | Technical Function                                                                          | Practical Purpose                                                                                                    |
+| :-------------- | :------------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------- |
+| **`seMarker`**  | Pass the `SummarizedExperiment` object created by `getMarkerFeatures()`.           | Provides the statistical matrix (accessibility counts) for the plot.                                        |
+| **`cutOff`**    | Applies a specific statistical filter (e.g., $FDR \le 0.1$ and $Log_2FC \ge 0.5$). | Prevents the plot from becoming cluttered by only showing the most significant peaks.                       |
+| **`transpose`** | Flips the $x$ and $y$ axes of the matrix.                                          | Changes the orientation; `TRUE` puts cell groups on one axis and peaks on the other for better readability. |
+
+
+We can plot this heatmap using `draw()`.
+```r
+draw(heatmapPeaks, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+```
+
+To save an editable vectorized version of this plot, we use the plotPDF() function.
+```R
+plotPDF(heatmapPeaks, name = "Peak-Marker-Heatmap", width = 8, height = 6, ArchRProj = projHeme5, addDOC = FALSE)
+```
+![alt text](image-35.png)
+
+
+### 13.2.2 Interpreting Your Marker Peak Heatmap
+
+The heatmap in **Peak-Marker-Heatmap.pdf** serves as the "visual proof" of your cluster identities. It transforms 32,050 complex genomic features into a clear, diagonal pattern that demonstrates exactly how each cell type is unique at the chromatin level.
+
+---
+
+#### 1. Breakdown of the Visual Components
+
+| Component                 | What it Represents                                                                                                                                              |
+| :------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rows (Y-Axis)**         | Your **10 cell clusters** (B, CD4.M, Mono, etc.). Because you used `transpose = TRUE`, these are listed vertically.                                    |
+| **Columns (X-Axis)**      | The **32,050 marker peaks** identified across your project. These are the specific "regulatory switches" in the DNA.                                   |
+| **Color Scale (Z-Score)** | Represents the **relative accessibility**. Red (2) indicates high accessibility compared to other groups, while Blue (-2) indicates low accessibility. |
+| **The Diagonal Blocks**   | These bright red "stair-step" patterns represent the **unique signatures** of each group.                                                              |
+
+---
+
+#### 2. How to Interpret the "Fingerprint"
+
+To interpret this heatmap for your research, look at the alignment between a cluster name and its corresponding red block:
+
+*   **Cluster-Specific Accessibility**: The large red block for **Mono** indicates thousands of genomic regions that are wide open and active in Monocytes but tightly closed (blue) in almost every other cell type.
+*   **Regulatory "Switching"**: Looking vertically down any single column (one specific peak) shows it "turning on" (red) for one cell type and "turning off" (blue) for others. This visualizes cell-type-specific gene regulation.
+*   **Shared Lineages**: Groups like **CD4.M** and **CD8.CM** have blocks that look somewhat similar, which is biologically expected as they are both T-cell subtypes sharing similar open chromatin regions.
+
+---
+
+#### 3. Biological Significance for Your Thesis
+
+Each of these 32,050 features is a potential candidate for explaining the biology of your heart samples. 
+
+*   **Promoter vs. Distal**: While many peaks are near gene promoters, the most interesting ones for your Atrial Fibrillation study are often the **Distal** enhancers found in these blocks. 
+*   **Identifying Drivers**: The specific red block for a "diseased" cluster likely contains the enhancers that drive the expression of genes involved in cardiac arrhythmia.
+*   **Technical Quality**: The sharpness of the diagonal indicates a high-quality dataset; a blurry mess of colors would suggest poorly defined clusters or noisy peak calling.
+
+---
+
+> **Peer Tip**: Look closely at the **pDC** and **PreB** clusters at the bottom right of **Peak-Marker-Heatmap.pdf**. Their red blocks are very sharp and distinct, suggesting these cell types have a very unique regulatory program compared to the "Progenitor" cells right next to them.
+
+
+### 13.2.3 Visualizing Markers: MA and Volcano Plots
+
+Beyond heatmaps, ArchR allows you to focus on an individual cell group (like your **Erythroid** cluster) using MA and Volcano plots. These plots help you evaluate the statistical strength and the magnitude of change for your identified marker peaks.
+
+---
+
+#### 1. The MA Plot
+The first plot represents the relationship between the intensity of the signal and the magnitude of the difference.
+
+*   **X-Axis ($log_2 \text{ Mean}$)**: Represents the average accessibility of a peak across all samples.
+*   **Y-Axis ($log_2 \text{ Fold Change}$)**: Represents how much more (or less) accessible a peak is in the target group compared to the background.
+*   **Interpretation**: The red points (5,189 features in your plot) are the **Up-Regulated** peaks. These are regions that are significantly more open in this specific cell group.
+*   **Observation**: In your results, 0% are down-regulated because marker detection typically focuses on enrichment—the "fingerprint" that defines what is unique to that cluster.
+  
+![alt text](image-36.png)
+
+---
+
+#### 2. The Volcano Plot
+The second plot is used to identify peaks that are both statistically significant and have a large magnitude of change.
+
+*   **X-Axis ($log_2 \text{ Fold Change}$)**: The magnitude of enrichment in the target group.
+*   **Y-Axis ($-log_{10} \text{ FDR}$)**: The statistical significance. The higher the point, the more confident we are that the enrichment is not due to random noise.
+*   **Interpretation**: The most "reliable" marker peaks for your heart research are found in the **top-right corner**—these have high significance and a high fold change.
+*   **Filtering**: Points in red have passed your specific thresholds (e.g., $FDR \le 0.01$ and $log_2FC \ge 1$).
+
+![alt text](image-37.png)
+
+---
+
+#### 3. Summary of Results (From Your Plots)
+
+| Metric             | Value         | Meaning                                                                   |
+| :----------------- | :------------ | :------------------------------------------------------------------------ |
+| **Total Features** | 145,956       | The total number of peaks in your union peak set.                |
+| **Up-Regulated**   | 5,189 (3.56%) | Peaks that are uniquely "open" for this cluster.                 |
+| **Down-Regulated** | 0 (0%)        | No peaks were significantly "closed" relative to the background. |
+
+---
+
+> **Thesis Tip**: Use the **Volcano plot** to justify your choice of markers. If someone asks why you chose a specific enhancer near an Atrial Fibrillation gene, you can point to its position in the top-right of the volcano plot to prove it is both highly specific and statistically undeniable.
+
+---
+### 13.2.3 Visualizing Marker Peaks in Browser Tracks
+
+While the MA and Volcano plots give you a global statistical view, the `plotBrowserTrack()` function allows you to zoom in on a specific gene to see exactly where those marker peaks live on the chromosome. This creates a "Genome Browser" style view that is essential for validating that your marker peaks are actually located near relevant genes.
+
+```r
+p <- plotBrowserTrack(
+    ArchRProj = projHeme5, 
+    groupBy = "Clusters2", 
+    geneSymbol = c("GATA1"),
+    features = getMarkers(markerPeaks, cutOff = "FDR <= 0.1 & Log2FC >= 1", returnGR = TRUE)["Erythroid"],
+    upstream = 50000,
+    downstream = 50000
+)
+```
+
+| Argument                    | Technical Function                                                                  | Practical Purpose                                                                                          |
+| :-------------------------- | :---------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| **`geneSymbol`**            | Centers the plot on the **GATA1** gene.                                    | Focuses the view on a master regulator of Erythroid development.                                  |
+| **`features`**              | Passes a `GRanges` object of the markers specifically for Erythroid cells. | Adds a specific highlight track at the bottom to show which peaks were statistically significant. |
+| **`upstream / downstream`** | Sets the viewing window to **50,000 bp** (50kb) on either side.            | Provides context of the surrounding "genomic neighborhood" (100kb total).                         |
+| **`returnGR = TRUE`**       | Ensures `getMarkers()` output is in a genomic format.                      | Allows the plotting function to physically align the peaks with the DNA sequence.                 |
+
+### Interpreting the results
+
+![alt text](image-38.png)
+
+
+
+The visualization represents a 100kb window centered on the **GATA1** gene, a master regulator of red blood cell development. This plot provides the visual "smoking gun" that connects your statistical marker peak analysis to physical locations on the genome.
+
+---
+
+#### 1. The Coverage Tracks (Top Section)
+
+*   **Normalized Signal**: Each track shows the accessibility (openness) of chromatin for that specific cell group, normalized by "ReadsInTSS" to allow fair comparison between clusters.
+*   **Common Peaks**: You will notice a high peak near the end of the GATA1 gene that is present in all clusters. This usually indicates a constitutive element or a shared promoter.
+*   **Erythroid Specificity**: In the orange track (**Erythroid**), there are several distinct "humps" of accessibility between the 48,625,000 and 48,650,000 coordinates that are almost entirely flat (blue/purple/green) in the other cell types.
+
+---
+
+#### 2. The Erythroid Peaks Track (Middle Section)
+
+*   **Marker Identification**: The four red bars in this track indicate the physical locations of the marker peaks identified in Chapter 13.
+*   **Statistical Alignment**: These bars align perfectly with the "humps" observed in the Erythroid coverage track. This proves that these regions are statistically unique to this cell group.
+*   **Enhancer Candidates**: Because these four red bars are located upstream (to the left) of the GATA1 gene body, they are likely **distal enhancers**—the specific regulatory switches that turn on GATA1 only in Erythroid cells.
+
+---
+
+#### 3. The Genes Track (Bottom Section)
+
+*   **Gene Models**: This section shows the structure of the genes in this neighborhood, including *GLOD5*, *GATA1*, *HDAC6*, and *ERAS*.
+*   **Transcription Direction**: The arrows on the gene models indicate the direction in which the gene is "read" on the DNA strand.
+*   **Gene Body**: The thick red blocks represent **exons**, which are the parts of the DNA that actually code for proteins.
+
+---
+
+#### Summary of the Biological Story
+
+In the context of heart research, this plot demonstrates that while many cells might have the "switch" for the *GATA1* promoter open, only the **Erythroid** cells have these four specific distal enhancers flipped "on" (accessible). This explains why *GATA1* is likely expressed at high levels in these cells but not in others, such as Monocytes or B-cells.
+
+---
+### Example for Mono: CD14
+
+```r
+p <- plotBrowserTrack(
+    ArchRProj = projHeme5, 
+    groupBy = "Clusters2", 
+    # Edit 1: Change to a Monocyte-relevant gene
+    geneSymbol = c("CD14"), 
+    # Edit 2: Index the markers for "Mono" instead of "Erythroid"
+    features =  getMarkers(markerPeaks, cutOff = "FDR <= 0.1 & Log2FC >= 1", returnGR = TRUE)["Mono"],
+    upstream = 50000,
+    downstream = 50000
+)
+```
+![alt text](image-39.png)
