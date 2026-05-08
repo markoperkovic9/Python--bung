@@ -1,4 +1,14 @@
+# Starting up ArchR
+
+```r
+library(ArchR)
+set.seed(1)
+addArchRLocking(locking = TRUE)
+addArchRThreads(threads = 16) 
+addArchRGenome("hg19")   #or 38
+```
 # Explanation of some points in ArchR-Guide
+
 
 
 Quality Control (QC) in ArchR
@@ -3608,3 +3618,378 @@ When you run motif enrichment on **marker peaks**, you're asking what TFs define
 - It avoids the arbitrariness of choosing a single comparison group
 - It can be run for **every cell type simultaneously**
 - The enriched motifs are more likely to reflect genuine cell-type-specific regulators rather than relative differences between two similar populations
+
+
+---
+### 14.1.5 Plotting motif logos
+
+Because different motif annotations will use different position weight matrices (PWMs), it’s often useful to plot the sequence logo of the exact motif being used. Multiple tools exist to do this but the one we prefer is `ggseqlogo`
+
+To do this, we must first extract the relevant motif information as a PWMatrix object.
+```r
+pwm <- getPeakAnnotation(projHeme5, "Motif")$motifs[["SOX6_868"]]
+pwm
+## An object of class PWMatrix
+## ID: ENSG00000110693_LINE19574_SOX6_I_N7
+## Name: SOX6
+## Matrix Class: Unknown
+## strand: *
+## Pseudocounts: 
+## Tags: 
+## $ensembl
+## [1] "ENSG00000110693"
+## 
+## Background: 
+##    A    C    G    T 
+## 0.25 0.25 0.25 0.25 
+## Matrix: 
+##         [,1]      [,2]      [,3]      [,4]      [,5]      [,6]      [,7]
+## A  0.2856363  1.236986  1.297203 -2.131381  1.340070  1.259222 -1.224160
+## C -0.6196693 -2.173286 -3.473518  1.257839 -3.473518 -1.259465 -1.366327
+## G -0.4525775 -1.628926 -1.447733 -1.817039 -2.592395 -1.817039 -3.473518
+## T  0.4023151 -1.407137 -2.592395 -1.604399 -2.592395 -3.473518  1.229625
+##         [,8]
+## A  0.4500618
+## C -0.4283456
+## G  0.2154626
+## T -0.6169845
+```
+The output is a PWMatrix object for SOX6, a transcription factor often involved in muscle and cardiac development. Here is how to read this technical data:
+
++ The Log-Odds Scores: The numbers in the Matrix: section represent "weights." A positive number (like 1.340070 for A at position 5) means that the base is highly preferred at that spot. A large negative number (like -3.473518) means that base is almost never found there.
+
++ The Binding Signature: Looking at positions 2 through 6, you can see high positive values for A. This tells you the core "sequence" this TF is looking for is likely an A-rich stretch.
+
++ Background Probabilities: The Background: values show a neutral 0.25 for each base, meaning the scores are calculated against a random genomic expectation.
+
+To explain what you're seeing here, we need to shift our focus from where the DNA is open (peaks) to who is actually sitting on that DNA to control your heart cells.
+
+
+
+__How This Applies to the ArchR Tutorial__
+
+In your Atrial Fibrillation research, you aren't just looking for random patterns; you're looking for the mechanistic causes of gene expression changes. This step bridges that gap:
+
++ Verification of Identity: Different motif databases (CIS-BP, JASPAR, ENCODE) represent the same TF differently. By extracting the PWM, you are verifying the exact "fingerprint" ArchR is using to scan your peaks.
+
++ Motif Enrichment: ArchR will take this SOX6 matrix and "scan" every peak in your projHeme5. If your Erythroid or Mono marker peaks have significantly more SOX6 binding sites than other clusters, ArchR will flag SOX6 as a "Marker Motif."
+
++ Visualization Prep: The next step in the tutorial usually involves ggseqlogo(pwm). This takes that raw matrix of numbers and turns it into the familiar "stack of letters" where the height of the letter represents its importance at that position.
+
+Why SOX6 specifically?
+
+In the context of the Hematopoiesis tutorial (which uses projHeme), SOX6 is a major regulator of Erythropoiesis (red blood cell production). If you were looking at your AFib data, you might instead be extracting motifs for GATA4, TBX5, or PITX2—the master regulators of cardiac rhythm and structure.
+
+---
+#### ProbMatrix (Position Probability matrix)
+Then, we convert that object to a position probability matrix. We do this with a function, which could be used in an lapply statement if you wanted to do this for many PWMatrix objects or a PWMatrixList. The function you ran, PWMatrixToProbMatrix, is doing the mathematical heavy lifting of reversing the log-transformation. It takes those bit-scores and turns them back into a scale from 0 to 1.
+
+```r
+PWMatrixToProbMatrix <- function(x){
+  if (class(x) != "PWMatrix") stop("x must be a TFBSTools::PWMatrix object")
+  m <- (exp(as(x, "matrix"))) * TFBSTools::bg(x)/sum(TFBSTools::bg(x))
+  m <- t(t(m)/colSums(m))
+  m
+}
+
+ppm <- PWMatrixToProbMatrix(pwm)
+ppm
+```
+
+![alt text](image-43.png)
+
+__How to read that ppm output:__
+
++ The Probability Map: Every column represents a single position in the DNA sequence that the SOX6 protein likes to grab.
+
++ Reading a Column: Look at Column 5. You’ll see the value for A is 0.954827787. This means there is a 95.5% chance that the 5th letter of this motif is an A. It’s almost a certainty.
+
++ The Consensus: By scanning the highest values in each column, you can "read" the SOX6 signature:
+
+        Pos 2: A (86%)
+
+        Pos 3: A (91%)
+
+        Pos 5: A (95%)
+
+        Pos 6: A (88%)
+
+        Pos 7: T (85%)
+
+This Position Probability Matrix (PPM), has column sums that add to 1.
+```r
+colSums(ppm) %>% range
+```
+---
+
+### Visualizing Information Content
+
+method. This is the standard visualization used in biological publications because it doesn't just show you what the motif looks like—it tells you which parts of the motif actually **matter** for protein binding.
+
+---
+![alt text](image-45.png)
+#### 1. What You Are Seeing
+In the "bits" logo, the Y-axis represents **Information Content** (often called Shannon Entropy). For DNA sequences, this scale ranges from **0 to 2 bits**.
+
+* **Variable Stack Height**: Unlike the "prob" version, the stacks here have different heights. This is the "signal-to-noise" filter. 
+* **High Conservation (Tall Stacks)**: Positions like **5** and **4** are very tall. This indicates that these positions are highly conserved; the SOX6 protein is extremely "picky" about these bases. 
+* **Low Conservation (Short Stacks)**: Positions like **1** and **8** are very short. This tells you that these positions have low information content—the protein can likely tolerate different bases here without losing its grip on the DNA.
+
+---
+
+#### 2. Comparison: Bits vs. Prob
+
+| Feature           | `method = "bits"` (The "Signal")                        | `method = "prob"` (The "Raw Data") |
+| :---------------- | :------------------------------------------------------ | :--------------------------------- |
+| **Y-Axis**        | **Bits** (0 to 2)                                       | **Probability** (0.0 to 1.0)       |
+| **Stack Height**  | **Variable**: Shows biological importance.              | **Constant**: Every stack is 1.0.  |
+| **Best Used For** | Publication figures and identifying core binding sites. | Debugging raw base frequencies.    |
+| **Visual Logic**  | "Height = Certainty."                                   | "Height = Scale limit."            |
+
+
+
+---
+
+#### 3. How This Applies to Your ArchR Workflow
+
+In your Atrial Fibrillation research, you are looking for the "drivers" of your clusters. The "bits" logo is your most powerful tool for this:
+
+1.  **Motif Scanning**: ArchR uses the high-bit positions (the tall letters) to weight its search. A "match" in a peak is only considered strong if it matches the tall letters (like the **A** at position 5).
+2.  **Biological Mechanism**: By looking at the bits logo, you can see the "core" of the SOX6 binding site. If you find that this specific core sequence is significantly enriched in your **Erythroid** marker peaks, you have strong evidence that SOX6 is a key transcription factor driving that cell type's identity.
+3.  **Thesis Impact**: When you present your findings, using the "bits" logo allows you to say: *"We identified a highly conserved SOX6 binding motif (Positions 2–7) enriched within cluster-specific enhancers."*
+
+---
+
+> **Expert Guide Note**: Think of the "bits" logo as a map with a **heat signature**. The "prob" logo shows you every street equally, but the "bits" logo highlights the "high-traffic" areas where the transcription factor is most likely to spend its time. It’s the difference between seeing all possible data and seeing the data that is **functionally relevant**.
+### Visualizing Proportions: The `method = "prob"` Logo
+
+![alt text](image-44.png)
+
+
+---
+
+#### 1. What You Are Seeing
+In this image, every vertical stack (1–8) reaches the exact same height on the Y-axis (**1.0**). This is a direct visualization of the **Position Probability Matrix (PPM)** you calculated in the previous step.
+
+* **Uniform Stack Height**: Unlike the "bits" method, there is no visualization of "Information Content" here. Because every column in a PPM must sum to 1, every stack is forced to the same height.
+* **The "Unbiased" Raw Ratios**: Notice **Position 1** and **Position 8**. They show a messy mix of A, T, G, and C. In this view, they look just as "tall" as **Position 5** (which is almost 100% A). 
+* **The Signature**: Even without the bit-weighting, the SOX6 signature is visible: positions 2, 3, 5, and 6 are clearly "A-heavy," while position 4 is dominated by "C" and position 7 by "T."
+
+---
+
+#### 2. Comparison: Bits vs. Prob
+
+| Feature            | `method = "bits"`                              | `method = "prob"` (This Image)              |
+| :----------------- | :--------------------------------------------- | :------------------------------------------ |
+| **Y-Axis**         | Information Content (0 to 2 Bits)              | Probability (0.0 to 1.0)                    |
+| **Stack Height**   | **Variable**: Tall stacks = High conservation. | **Constant**: Every stack is 1.0.           |
+| **Visual Message** | "Focus on these core, critical bases."         | "Here is the raw frequency of every base."  |
+| **Interpretation** | Highlights the "Signal" from the "Noise."      | Treats every position as equally important. |
+
+---
+
+#### 3. How This Applies to Your ArchR Workflow
+In your Atrial Fibrillation analysis, ArchR uses both concepts behind the scenes:
+1.  **Probability (This View)**: Used to calculate the "match score" of a peak. If your peak has an "A" at position 5, it gets a high score because the probability is near 1.0.
+2.  **Information Content (Bits View)**: Used to weight those scores. A mismatch at the "A" in position 5 (a high-bit position) is penalized much more heavily than a mismatch at position 1 (a low-bit position).
+
+---
+
+> **Peer Tip**: If you’re putting a figure in your final thesis to show the "identity" of a Transcription Factor, **always use the "bits" method**. The `prob` method can be misleading because it makes "noisy" positions (like your Position 1) look just as significant as the core binding site.
+
+----
+
+## 14.2 ArchR Enrichment
+
+###  Understanding Different Enrichment Types in ArchR
+
+In ArchR, enrichment analysis is the process of asking, "What biological meaning is hidden within my marker peaks?" While the function `peakAnnoEnrichment()` is the primary tool for these analyses, the results change significantly based on the **reference database** you choose.
+
+---
+
+#### 1. Motif Enrichment (`Motif`)
+This analysis identifies **Transcription Factor (TF)** binding sites that are statistically over-represented in your marker peaks.
+
+* **Basis**: Uses Position Weight Matrices (PWMs) to scan the DNA sequence for specific patterns (e.g., the "A-A-C-A-A-T" signature we saw for SOX6).
+* **Question**: "Does this specific DNA sequence pattern appear in my peaks more than expected by chance?"
+* **Result**: Provides a list of **potential** TFs that might be driving the chromatin accessibility in a specific cluster.
+* **Pros/Cons**: It is incredibly broad (scanning thousands of TFs), but it is a **prediction** based on sequence identity, not physical proof that the protein is actually bound there.
+
+
+
+#### 2. ENCODE TFBS Enrichment (`EncodeTFBS`)
+This analysis compares your identified peaks to real-world experimental data curated by the ENCODE project.
+
+* **Basis**: Uses **ChIP-seq** data, which is a physical laboratory measurement of where a protein was actually bound to DNA in a living cell.
+* **Question**: "Do my marker peaks overlap with genomic regions where scientists have physically measured TFs binding in other experiments?"
+* **Result**: Provides **experimental validation**. If your Erythroid peaks show ENCODE enrichment for GATA1, it confirms your results align with gold-standard hematopoiesis biology.
+* **Pros/Cons**: Highly reliable due to physical evidence, but it is limited to the specific cell types and TFs that the ENCODE consortium has actually tested.
+
+![alt text](image-46.png)
+#### 3. Gene Ontology (GO) Enrichment
+This analysis shifts the focus from DNA sequence patterns to the **biological function** of the genes located near your peaks.
+
+* **Basis**: Links each marker peak to its nearest gene and then checks a database of biological pathways (Gene Ontology).
+* **Question**: "What biological processes (e.g., 'Cardiac Muscle Contraction' or 'Inflammatory Response') are the genes near my peaks involved in?"
+* **Result**: Defines the **biological theme** of a cluster, helping you confirm that your "Mono" cluster is actually involved in immune responses.
+* **Pros/Cons**: Excellent for "big picture" interpretation, but it operates on the assumption that a peak's primary target is always the nearest gene, which isn't always the case in 3D space.
+
+
+
+#### 4. Custom Enrichment (User-Defined)
+ArchR allows you to define your own sets of genomic coordinates to test against your peaks.
+
+* **Basis**: You provide the coordinates, such as a list of **GWAS variants** associated with Atrial Fibrillation.
+* **Question**: "Are disease-associated genetic variants specifically located within the open chromatin of my marker peaks?"
+* **Result**: Directly links your single-cell data to **clinical or disease-specific** questions, which is often the "hook" for a high-impact thesis.
+
+---
+
+#### Summary Comparison Table
+
+| Enrichment Type | Data Source                   | Metric Measured                | Primary Use Case                             |
+| :-------------- | :---------------------------- | :----------------------------- | :------------------------------------------- |
+| **Motif**       | PWM Databases (JASPAR/CIS-BP) | DNA Sequence Patterns          | Identifying potential TF drivers.            |
+| **ENCODE**      | ChIP-seq Experiments          | Physical Protein Binding       | Validating TFs with experimental data.       |
+| **GO**          | Gene Ontology Consortium      | Biological Pathways            | Understanding the function of the cluster.   |
+| **Custom**      | User (GWAS / BED files)       | Overlap with Specific Features | Linking peaks to disease or unique datasets. |
+
+---
+
+> **Thesis Tip**: For a truly robust analysis, I recommend using **Motif Enrichment** to nominate potential drivers and then following up with **ENCODE Enrichment** to see if experimental evidence supports those findings. When both analyses point to the same Transcription Factor, your biological conclusion is significantly more defensible!
+
+---
+
+# ChromVAR Deviatons Enrichment with ArchR
+
+## Motif Deviations
+
+__Converting Accessibility into Transcription Factor Activity__
+
+Think of this step as the transition from "Where is the DNA open?" to "Which proteins are actually in the driver's seat?" In single-cell ATAC-seq, individual peaks are often too "noisy" to tell a clear story. Motif Deviations solve this by grouping thousands of peaks together based on the transcription factor (TF) motifs they contain, giving you a much clearer signal of TF activity for every single cell.
+
+1. Adding Motif Annotations
+```r
+if("Motif" %ni% names(projHeme5@peakAnnotation)){
+    projHeme5 <- addMotifAnnotations(ArchRProj = projHeme5, motifSet = "cisbp", name = "Motif")
+}
+```
++ What it does: This scans your entire peak set for known DNA sequences (motifs) from the CIS-BP database.
+
++ The Goal: It creates a "map" that tells ArchR exactly which peaks contain which TF binding sites. Without this map, you can't aggregate the signal.
+  
+
+2. Identifying Background Peaks (addBgdPeaks)
+
+```r
+projHeme5 <- addBgdPeaks(projHeme5)
+```
+Why this is critical: To know if a motif is "enriched" in a cell, you need a fair baseline. You can't just compare a GATA1-containing peak to a random segment of closed DNA.
+
+The Logic: This function uses the chromVAR approach to find "look-alike" peaks. It matches peaks based on:
+
+    GC-content: DNA with high G-C pairs behaves differently than A-T rich DNA.
+
+    Accessibility (Fragment Count): Comparing a very "popular" peak to a quiet one would bias your results.
+
+The Math: It uses Mahalanobis distance to ensure the background peaks are as similar as possible to your target peaks in terms of these technical biases.
+
+3. Computing the Deviations Matrix (addDeviationsMatrix)
+
+```r
+projHeme5 <- addDeviationsMatrix(
+  ArchRProj = projHeme5, 
+  peakAnnotation = "Motif",
+  force = TRUE
+)
+```
+The Output: This creates a new matrix in your Arrow files called "MotifMatrix".
+
+What is a "Deviation"?: It is a Z-score. It represents how much the accessibility of all peaks containing a specific motif (like GATA4 or PITX2) in a single cell differs from the expected accessibility based on those background peaks.
+
+The Result: You effectively turn your ATAC-seq data into something that looks like RNA-seq. Instead of "Peak counts," you now have "TF activity scores" for every cell.
+
+4. Accessing the deviations
+
+```r
+plotVarDev <- getVarDeviations(projHeme5, name = "MotifMatrix", plot = TRUE)
+```
+![alt text](image-47.png)
+
++ `combinedVars`: This is the most important column in this view. It measures the variability of a TF's activity across all cells. A high value (like 13.86 for SPIB) means that TF is extremely active in some clusters and nearly silent in others, making it a prime candidate for a "master regulator".
+
++ `combinedMeans`: This indicates the average activity level. Interestingly, a TF can have a negative mean but high variability, meaning its relative "dip" in activity is just as biologically important as its "peak".
+  
++ If you look at the `seqnames` column, you’ll see the letter "z" instead of something like "chr1". This is a fundamental shift in how ArchR stores data:
+  
+   * No Physical Location: Unlike peaks or genes, a "Motif Deviation" doesn't live in one spot on the genome. It is a mathematical score calculated by looking at every peak that contains that motif across the entire genome.
+   
+   * The Dual-Storage System: ArchR effectively "tricks" the standard matrix format to store two different types of data in the same object:deviations: The raw amount of "bias" or enrichment for that motif.z: The statistical $Z$-score (significance) of that deviation.
+   * This technical quirk has a massive impact on how you write your code in the next few steps. Because MotifMatrix contains both z-scores and deviations, ArchR functions like getMarkerFeatures() will crash or give nonsensical results if you don't tell them which one to use. When you move on to identifying "Marker Motifs" (motifs unique to a cluster), you will almost always need to subset the matrix to z. This ensures you are comparing the statistical significance of TF activity rather than just the raw deviation values.
+  
+### The Plot
+
+![alt text](image-48.png)
+
+The Y-Axis (Variability): This measures the combinedVars—the degree to which a transcription factor's activity fluctuates between your cell clusters. High variability means the TF is a "switch" that is turned ON in some cells and OFF in others.
+
+The X-Axis (Rank Sorted Annotations): Every dot is one of the ~800+ motifs you scanned. They are sorted from most variable to least variable.
+
+The Color Gradient: Darker colors (purple to black) indicate the highest variability (values >10), while light blue indicates low variability (~5 or less).
+
+In your manual, this plot serves as a Filtering Tool.
+
+    Identifying Significance: You don't want to waste time plotting all 800 TFs. You focus your future UMAPs and heatmaps only on the "Top N" (usually the top 25–50) TFs identified in this elbow plot.
+
+    The Subsetting Rule: Remember that your MotifMatrix stores both deviations and z-scores. When you see these high-variability TFs, you will next use the z-score version of this matrix to see which specific clusters those TFs are "lighting up."
+
+### Subsetting motifs and plotting them
+
+![alt text](image-50.png)
+
+
+#### Understanding the Visuals
+
++ The X-Axis (z:Motif): This is the chromVAR $Z$-score. A value significantly greater than 0 indicates that the cells in that cluster have chromatin that is much more open at that specific TF's binding sites than expected by random chance.
++ The Ridge (The "Hump"): Each ridge represents a cluster. The width and height show the distribution of cells. A hump shifted to the far right means that the cluster is "driven" by that transcription factor.
++ Imputation: You used `getImputeWeights`, which "smooths" the data by sharing information between similar cells. This reduces the technical noise common in single-cell ATAC-seq and makes these distribution curves look cleaner and more reliable.
++ __Looking at GATA1:__ The Erythroid cluster shows a massive shift to the right (scores reaching 8+). All other clusters are pinned near zero. This confirms GATA1 is the absolute master regulator of your Erythroid cells.
+
+---
+__Instead of looking at the distributions of these z-scores, we can overlay the z-scores on our UMAP embedding as we’ve done previously for gene scores.__
+
+![alt text](<Screenshot 2026-05-08 145423.png>)
+
+While the ridge plots (distributions) tell you if a cluster is driven by a specific transcription factor (TF), these UMAP plots show you where that activity lives in your cellular landscape. By overlaying the chromVAR $Z$-scores onto the UMAP embedding, you can physically see the "regulatory territory" of each master regulator.
+
+Deep Red/Yellow: High $Z$-scores, indicating regions where the chromatin is significantly more accessible at those motif binding sites. This is where the TF is most "active."Light Blue/Deep Blue: Low or negative $Z$-scores, indicating "regulatory deserts" for that specific TF.
+
+
+
++ z:CEBPA_155: Notice the intense red signal in the bottom-right cluster. This confirms that CEBPA activity is the defining characteristic of the Mono and GMP lineages.
+
++ z:GATA1_383: The activity is tightly restricted to the center-right cluster. This is the Erythroid "island," where GATA1 is king.
+
++ z:TBX21_780: The high signal is concentrated in the far-left "arm" of the UMAP. This identifies that specific region as the CD8.CM / T-cell territory.
+
++ z:PAX5_709 & z:EBF1_67: These two show nearly identical patterns in the top and leftmost clusters, marking the progression of B-cell development from CLP to PreB to mature B-cells.
+
++ z:IRF4_632: Shows a broader activity pattern, particularly strong in both the B-cell and Myeloid regions, highlighting its role as a multi-lineage coordinator.
+  
+---
+
+### 15.3 Comparing Gene Expression (Gene Scores) to TF Activity (Motif Deviations)
+![](image-51.png)
+
+While the previous UMAPs showed where the Motif Switches were flipped on ($Z$-scores), these new UMAPs show where the TF Genes are actually being expressed (Gene Scores).
+
+These plots visualize the predicted expression of the transcription factor genes themselves.
+
+    GATA1: The high gene score (yellow/pink) is localized perfectly in the central-right island.
+
+    CEBPA: The "expression" is strongest in the large vertical cluster at the bottom-right.
+
+    TBX21: Expression is restricted to the distinct bottom-left "arm."
+
+    PAX5 & EBF1: These show nearly identical patterns in the top and upper-left clusters.
+
