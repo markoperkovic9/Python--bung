@@ -3256,3 +3256,355 @@ p <- plotBrowserTrack(
 )
 ```
 ![alt text](image-39.png)
+
+## Motif enrichment
+
+
+### What we're trying to do
+
+We want to look inside a **single specific peak** (the CEBPA promoter) and see which TF motifs are present within it. Think of it like asking: *"Of all the known TF binding patterns, which ones can be found in this stretch of DNA?"*
+
+---
+
+### Block 1: Extracting and naming the peak set
+
+```r
+pSet <- getPeakSet(ArchRProj = projHeme5)
+pSet$name <- paste(seqnames(pSet), start(pSet), end(pSet), sep = "_")
+```
+
+- **`getPeakSet()`** retrieves all peaks stored in your ArchRProject as a `GRanges` object — essentially a table where every row is a genomic region with a chromosome, start, and end position
+- **`seqnames()`**, **`start()`**, **`end()`** extract those three coordinates for each peak
+- **`paste(..., sep = "_")`** glues them together into a unique string name like `chr19_33792929_33794030`
+
+This gives every peak a **human-readable unique identifier**, since peaks don't come with built-in names.
+
+---
+
+### Block 2: Extracting the motif matches and aligning them
+
+```r
+matches <- getMatches(ArchRProj = projHeme5, name = "Motif")
+rownames(matches) <- paste(seqnames(matches), start(matches), end(matches), sep = "_")
+matches <- matches[pSet$name]
+```
+
+- **`getMatches()`** retrieves a `RangedSummarizedExperiment` (RSE) object — this is a matrix where:
+  - Each **row** is a peak
+  - Each **column** is a TF motif
+  - Each **cell** contains `TRUE`/`FALSE` — whether that motif was found in that peak
+
+- The **same naming trick** is applied to the rows of the matches object, again producing `chr19_33792929_33794030`-style names
+
+- **`matches[pSet$name]`** reorders the matches object so its rows appear in the **exact same order** as the peaks in `pSet`
+
+---
+
+### Why does the ordering step matter?
+
+These two objects — `pSet` and `matches` — were built separately and may not be sorted identically. If you try to cross-reference them without aligning their order, **row 500 in `pSet` might not correspond to row 500 in `matches`**, leading to completely wrong results. By giving both objects the same coordinate-based names and then reindexing, you guarantee they're perfectly synchronized.
+
+---
+
+### The big picture
+
+After these two blocks, you have:
+- `pSet` — all peaks, with coordinate-based names
+- `matches` — a motif presence/absence matrix, **in the same row order** as `pSet`
+
+You can now look up any peak by its coordinates and instantly know which motifs are present inside it — which is exactly what the next step (finding motifs in the CEBPA promoter peak) will do.
+
+## Breaking Down This Code
+
+### Block 1: Creating a GRanges object for the CEBPA promoter
+
+```r
+gr <- GRanges(seqnames = c("chr19"), ranges = IRanges(start = c(33792929), end = c(33794030)))
+```
+
+This simply packages the known coordinates of the CEBPA promoter into a `GRanges` object — the standard Bioconductor format for representing a genomic region. You're essentially creating a "search target" that says: *look at this specific window on chromosome 19.*
+
+---
+
+### Block 2: Finding which peaks overlap this region
+
+```r
+queryHits <- queryHits(findOverlaps(query = pSet, subject = gr, type = "within"))
+```
+
+- **`findOverlaps()`** compares two sets of genomic ranges and finds where they intersect
+- **`query = pSet`** means we're asking *"which peaks..."*
+- **`subject = gr`** means *"...fall within the CEBPA promoter region?"*
+- **`type = "within"`** is the key constraint — it only returns peaks that are **entirely contained inside** the `gr` region, not just partially overlapping
+- **`queryHits()`** extracts the **row indices** of `pSet` that passed this filter
+
+The result is a vector of integers — the positions of peaks that sit inside the CEBPA promoter.
+
+---
+
+### Block 3: Getting the motifs present in that peak
+
+```r
+colnames(matches)[which(assay(matches[queryHits,]))]
+```
+
+Working from the inside out:
+
+- **`matches[queryHits,]`** subsets the matches matrix to only the peak(s) overlapping CEBPA
+- **`assay()`** extracts the actual TRUE/FALSE matrix from the RSE object
+- **`which()`** returns the column indices where the value is `TRUE` — i.e., where a motif *was* found
+- **`colnames(matches)[...]`** converts those indices back into the actual motif names
+
+---
+
+### Reading the output
+
+```
+"KLF5_175"   "CTCF_177"   "EGR1_195"   "SP1_267" ...
+```
+
+Each name follows the format **`TFNAME_ID`** where the ID is an internal database identifier. The 53 motifs listed are all TF binding patterns that were detected within the CEBPA promoter sequence — meaning these TFs *could* physically bind there if they are expressed in the cell.
+
+Notable TFs in this list include well-known regulators like **SP1**, **CTCF**, **EGR1**, and **KLF** family members, which makes biological sense for an active gene promoter.
+
+---
+
+### The broader principle
+
+The tutorial's closing note is important — this same coordinate-matching approach is reusable anywhere you have a set of peaks of interest, whether those peaks are:
+
+- Linked to a gene via **peak-to-gene links**
+- Co-accessible with another peak
+- Differentially accessible in a cell type
+
+In all cases, the logic is the same: identify peaks by coordinates → look up their rows in the motif matches matrix → read off which TFs have binding sites there.
+
+## Breaking Down This Analysis
+
+### The goal
+
+We want to know: *among the peaks that are more open in Erythroid cells, are certain TF motifs showing up more often than you'd expect by chance?*
+
+---
+
+### Defining the peaks of interest
+
+The cutoff `FDR <= 0.1 & Log2FC >= 0.5` filters for peaks that are:
+
+- **Statistically significant** — FDR (false discovery rate) at most 10%, controlling for the fact that you're testing thousands of peaks simultaneously
+- **Biologically meaningful** — Log2FC ≥ 0.5 means at least a ~1.4-fold increase in accessibility in Erythroid vs Progenitor cells
+
+These two filters together give you a high-confidence set of "Erythroid-up" peaks to test.
+
+---
+
+### The enrichment test: `peakAnnoEnrichment()`
+
+```r
+motifsUp <- peakAnnoEnrichment(
+    seMarker = markerTest,
+    ArchRProj = projHeme5,
+    peakAnnotation = "Motif",
+    cutOff = "FDR <= 0.1 & Log2FC >= 0.5"
+)
+```
+
+Under the hood this uses a **hypergeometric test**, which essentially asks:
+
+> *Given that X% of all peaks contain motif Y, is motif Y appearing significantly more often in my Erythroid-up peaks than that background rate would predict?*
+
+It's the genomics equivalent of asking whether a particular word appears suspiciously often in one chapter of a book compared to the whole book.
+
+---
+
+### The output structure
+
+```
+dim: 870 1
+assays(10): mlog10Padj mlog10p ... CompareFrequency feature
+rownames(870): TFAP2B_1 TFAP2D_2 ... TBX18_869 TBX22_870
+colnames(1): Erythroid
+```
+
+- **870 rows** — one for each TF motif tested
+- **1 column** — the Erythroid vs Progenitor comparison
+- **10 assays** — different statistics stored for each motif, including corrected and uncorrected p-values, frequencies, etc.
+
+---
+
+### Preparing the data frame for plotting
+
+```r
+df <- data.frame(TF = rownames(motifsUp), mlog10Padj = assay(motifsUp)[,1])
+df <- df[order(df$mlog10Padj, decreasing = TRUE),]
+df$rank <- seq_len(nrow(df))
+```
+
+- Pulls out the motif names and their **-log10 adjusted p-values** (so larger = more significant)
+- Sorts from most to least enriched
+- Adds a **rank column** (1 = most enriched) which will be useful for making a ranked plot
+
+---
+
+### The biological result
+
+```
+GATA3_384   632.8
+GATA1_383   624.3
+GATA2_388   607.9
+```
+
+The -log10(p-adj) values in the hundreds are astronomically significant — these are not borderline findings. The GATA family dominates the top hits, which is a strong positive control. **GATA1** is one of the most well-characterized master regulators of red blood cell development, so recovering it as the top hit validates that the entire pipeline is working correctly. The fact that multiple GATA family members (GATA1–6) all rank in the top 6 further reinforces this, since they share very similar DNA binding motifs.
+
+## Breaking Down This Section
+
+### The plotting code for Erythroid-enriched motifs
+
+```r
+ggUp <- ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) + 
+  geom_point(size = 1) +
+  ggrepel::geom_label_repel(
+        data = df[rev(seq_len(30)), ], aes(x = rank, y = mlog10Padj, label = TF), 
+        size = 1.5,
+        nudge_x = 2,
+        color = "black"
+  ) + ...
+```
+
+A few things worth noting:
+
+- **`aes(rank, mlog10Padj, color = mlog10Padj)`** — rank goes on the x-axis, significance on y-axis, and the same significance value also drives the color, so highly enriched points are both high up *and* brightly colored
+- **`df[rev(seq_len(30)), ]`** — this selects only the top 30 motifs for labeling, and `rev()` reverses their order. This is a practical choice to reduce label crowding, which is why `ggrepel` still warns that 23 labels couldn't be placed without overlap
+- **`geom_label_repel()`** automatically nudges labels away from each other and from the points so they remain readable — essential when many significant motifs cluster at the top of the plot
+
+---
+
+### The Progenitor-down analysis
+
+The only meaningful change is the cutoff direction:
+
+- Erythroid-up used **`Log2FC >= 0.5`** — peaks *more* open in Erythroid
+- Progenitor-up uses **`Log2FC <= -0.5`** — peaks *less* open in Erythroid, meaning *more* open in Progenitor
+
+Everything else — the hypergeometric test, the data frame preparation, the plotting code — is identical.
+
+---
+
+### The biological result for Progenitor cells
+
+```
+ELF2_326    105.9
+TCF12_56     83.8
+RUNX1_733    75.7
+CBFB_801     64.6
+SPI1_322     60.4
+```
+
+Again, these results are biologically coherent:
+
+- **RUNX1** and **CBFB** form a heterodimer (the CBF complex) that is a master regulator of hematopoietic stem and progenitor cell identity
+- **SPI1** (also known as PU.1) and **ELF2** are ETS family TFs critical for myeloid and lymphoid progenitor function
+- The enrichment scores here (~60–106) are notably lower than the GATA scores (~270–630), suggesting the Erythroid signal is particularly clean and strong compared to the Progenitor signal
+
+---
+
+### The big picture of this two-sided analysis
+
+By running enrichment in both directions you get a complete regulatory picture of the Erythroid vs Progenitor comparison:
+
+| Direction               | Top motifs        | Biology                          |
+| ----------------------- | ----------------- | -------------------------------- |
+| More open in Erythroid  | GATA1/2/3         | Erythroid differentiation        |
+| More open in Progenitor | RUNX1, CBFB, SPI1 | Progenitor/stem cell maintenance |
+
+This kind of reciprocal result — where each cell type shows enrichment for its known master regulators — is exactly what gives you confidence that the differential accessibility analysis is capturing real biology.
+
+## Interpreting the Two Plots
+
+### Plot 1: Erythroid-enriched motifs 
+
+![alt text](image-41.png)
+
+The shape of the curve tells a clear story. There is an extremely steep drop-off after the first ~7 motifs, with the vast majority of the 870 tested motifs clustering near zero. This "hockey stick" shape indicates that the signal is **highly specific** — only a handful of TFs stand out, and they do so dramatically.
+
+The top hits are exclusively GATA family members (GATA1/2/3/4/5/6), with MECOM being the only non-GATA motif to separate itself from the background. The -log10(p-adj) values reaching ~450 are extraordinarily significant — these are not borderline results. The dark purple/black coloring of GATA1-3 versus the lighter blue of GATA6 and MECOM visually reinforces the tiered significance.
+
+**How to present this:** The key message is *specificity and strength*. A small number of TFs are massively enriched, and they all belong to one family with a well-established role in erythropoiesis. This is essentially a positive control validating your entire analysis.
+
+---
+
+### Plot 2: Progenitor-enriched motifs (bottom)
+
+![alt text](image-42.png)
+
+The curve here has a notably different shape — a **smoother, more gradual decline** rather than a sharp cliff. This tells you the Progenitor signal is more distributed across many TFs rather than concentrated in a single family. Many more motifs achieve meaningful significance before the curve flattens.
+
+The labeled top hits — TCF12, ELF2, MYOG, ASCL1 — are also more heterogeneous than the GATA cluster. The maximum -log10(FDR) reaches only ~83 compared to ~450 in the Erythroid plot, meaning the Progenitor signal, while real and significant, is considerably weaker and broader.
+
+**How to present this:** The message here is *regulatory complexity*. Progenitor cell identity appears to be maintained by a more diverse TF landscape rather than one dominant factor, which makes biological sense — progenitors must remain poised for multiple differentiation fates simultaneously.
+
+---
+
+### Comparing the two plots together
+
+When presenting these side by side, there are three contrasts worth highlighting:
+
+| Feature            | Erythroid                    | Progenitor               |
+| ------------------ | ---------------------------- | ------------------------ |
+| Signal strength    | ~450 max -log10(p)           | ~83 max -log10(p)        |
+| Signal specificity | Extremely tight (one family) | Broad and distributed    |
+| Curve shape        | Sharp cliff                  | Gradual decay            |
+| Biology            | One master regulator (GATA1) | Multiple cooperative TFs |
+
+The contrast itself is a finding — it suggests that erythroid differentiation involves a decisive commitment driven by a dominant TF program, while progenitor maintenance relies on combinatorial regulation.
+
+## Differential Peaks vs. Marker Peaks
+
+These two concepts are related but answer subtly different questions.
+
+---
+
+### Differential Peaks
+
+Differential peaks come from a **pairwise comparison** between two specific groups — in the previous section, Erythroid vs. Progenitor. The question being asked is:
+
+> *Which peaks are significantly more or less accessible when I directly compare group A to group B?*
+
+Key characteristics:
+- Requires you to **specify which two groups** to compare
+- The Log2FC is calculated relative to that specific other group
+- A peak being "up" means up *relative to that one comparison*
+- Best used when you have a **specific biological contrast** in mind
+
+---
+
+### Marker Peaks
+
+Marker peaks come from a **one-vs-all comparison** — a cell type is compared against all other cell types simultaneously. The question being asked is:
+
+> *Which peaks are uniquely or preferentially accessible in this cell type compared to everything else?*
+
+Key characteristics:
+- Each cell type is tested **against the rest of the dataset** as a whole
+- A peak being a "marker" means it stands out across the entire atlas, not just relative to one other group
+- Better captures what makes a cell type **distinctively itself**
+- More useful when you want to characterize cell type identity in an unbiased way
+
+---
+
+### A concrete analogy
+
+Imagine you're trying to characterize different cuisines:
+
+- **Differential** — "What ingredients does Italian food use more than French food?" You might find olive oil, but olive oil is also common in Spanish and Greek cuisine — it's just more common than in French.
+- **Marker** — "What ingredients are uniquely characteristic of Italian food compared to all other cuisines?" You'd find things like basil and San Marzano tomatoes — ingredients that are specifically Italian regardless of what you compare it to.
+
+---
+
+### Why this matters for motif enrichment
+
+When you run motif enrichment on **marker peaks**, you're asking what TFs define each cell type's regulatory identity in the context of the whole dataset. This is particularly powerful because:
+
+- It avoids the arbitrariness of choosing a single comparison group
+- It can be run for **every cell type simultaneously**
+- The enriched motifs are more likely to reflect genuine cell-type-specific regulators rather than relative differences between two similar populations
