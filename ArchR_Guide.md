@@ -3993,7 +3993,7 @@ These plots visualize the predicted expression of the transcription factor genes
 
     PAX5 & EBF1: These show nearly identical patterns in the top and upper-left clusters.
 
-## 14. 1 Motif footprinting
+## 16 Motif footprinting
 
 In an ATAC-seq experiment, the Tn5 transposase cuts open DNA. However, if a transcription factor is physically bound to a specific piece of DNA, it acts like a shield. The Tn5 cannot cut the DNA underneath the protein.
 
@@ -5026,3 +5026,235 @@ getPeak2GeneLinks(corCutOff=0.45)
 
 > The core value of Peak2Gene over co-accessibility is the RNA validation layer — a peak-gene correlation is far stronger evidence for a regulatory relationship than a peak-peak correlation alone, because it directly connects chromatin state to transcriptional output across the diversity of cell types in your dataset.
 
+## Chapter 17.4: Identification of Positive TF-Regulators
+
+---
+
+### The Core Problem This Chapter Solves
+
+ATAC-seq allows for the unbiased identification of TFs that exhibit large changes in chromatin accessibility at sites containing their DNA binding motifs. However, families of TFs share similar features in their binding motifs when looking in aggregate through position weight matrices (PWMs).
+
+This is the **motif redundancy problem**. For example, GATA1, GATA2, and GATA3 all bind nearly identical DNA sequences. If you see increased accessibility at GATA motifs in erythroid cells, you can't tell from the motif alone *which* GATA factor is responsible.
+
+To circumvent this challenge, ArchR can identify TFs whose inferred gene scores are correlated to their chromVAR TF deviation z-scores. To achieve this, ArchR correlates chromVAR deviation z-scores of TF motifs with gene activity scores of TF genes from the low-overlapping cell aggregates. When using scRNA-seq integration with ArchR, gene expression of the TF can be used instead of inferred gene activity score.
+
+The logic is elegant:
+
+```
+A TF is a "positive regulator" if:
+  1. Its motif becomes MORE accessible in certain cell types (chromVAR ↑)
+            AND
+  2. The TF's own gene is MORE expressed/active in those same cells (RNA/GeneScore ↑)
+            AND
+  3. This co-variation is consistent across the cell population
+```
+
+If both signals rise and fall together, it strongly implies the TF is actually present, binding its motif, and driving the accessibility changes — rather than a related family member doing the work.
+
+---
+
+### Step 1 — Identify Deviant TF Motifs
+
+```r
+seGroupMotif <- getGroupSE(
+  ArchRProj = projHeme5, 
+  useMatrix = "MotifMatrix", 
+  groupBy = "Clusters2"
+)
+```
+
+This retrieves the `MotifMatrix` — previously computed by chromVAR — aggregated per cell cluster. Because this `SummarizedExperiment` object comes from the `MotifMatrix`, it has two seqnames — "deviations" and "z" — corresponding to the raw deviations and deviation z-scores from chromVAR.
+
+The dimensions `1740 × 10` tell you: 870 motifs × 2 data types (deviations + z-scores), across 10 cell clusters.
+
+Next, subset to just the z-scores:
+
+```r
+seZ <- seGroupMotif[rowData(seGroupMotif)$seqnames == "z", ]
+```
+
+Then compute the **maximum delta z-score** across all clusters for each motif:
+
+```r
+rowData(seZ)$maxDelta <- lapply(seq_len(ncol(seZ)), function(x){
+  rowMaxs(assay(seZ) - assay(seZ)[,x])
+}) %>% Reduce("cbind", .) %>% rowMaxs
+```
+
+This calculates, for every motif, the largest difference in deviation z-score between any two clusters. It answers: *"how much does the chromatin accessibility at this motif change across cell types?"*
+
+A **high maxDelta** means the motif is highly cell-type-variable — these are the interesting motifs. A low maxDelta means the motif's accessibility is roughly constant everywhere — likely a constitutive or housekeeping element not worth focusing on for lineage-specific regulators.
+
+---
+
+### Step 2 — Correlate TF Motif Deviations with TF Gene Activity
+
+This is the analytical heart of the chapter. It's run twice — once with gene scores (ATAC-only), once with integrated RNA expression.
+
+#### Version A: Gene Score Matrix (ATAC-only)
+
+```r
+corGSM_MM <- correlateMatrices(
+    ArchRProj = projHeme5,
+    useMatrix1 = "GeneScoreMatrix",
+    useMatrix2 = "MotifMatrix",
+    reducedDims = "IterativeLSI"
+)
+```
+
+The log reveals the same KNN aggregation strategy used throughout Chapter 17 — **492 pseudo-bulk groupings** are created, and correlations are computed across them. Notably, the log warns:
+
+```
+Some entries in groupMat2 are less than 0, continuing without Log2 Normalization.
+Most likely this assay is a deviations matrix.
+```
+
+This is expected — chromVAR deviation z-scores can be negative (motif less accessible than background), so log2 normalization would be inappropriate. ArchR detects this automatically and skips it.
+
+The result is a **825-row DataFrame** — one row per TF where a matching gene name and motif name could be paired — with these key columns:
+
+| Column                 | Meaning                                                  |
+| ---------------------- | -------------------------------------------------------- |
+| `GeneScoreMatrix_name` | TF gene name (e.g. "GATA1")                              |
+| `MotifMatrix_name`     | Matched motif name (e.g. "GATA1_383")                    |
+| `cor`                  | Pearson r between gene score and motif deviation z-score |
+| `padj`                 | Adjusted p-value                                         |
+| `pval`                 | Raw p-value                                              |
+
+Looking at example rows: PRDM16 has `cor = 0.49`, `padj = 1.99e-28` — highly significant positive correlation. TP73-AS1 (a non-coding antisense RNA) has `cor = -0.10`, `padj = 1.0` — no relationship, correctly filtered out later.
+
+#### Version B: Gene Integration Matrix (scRNA-seq expression)
+
+```r
+corGIM_MM <- correlateMatrices(
+    ArchRProj = projHeme5,
+    useMatrix1 = "GeneIntegrationMatrix",
+    useMatrix2 = "MotifMatrix",
+    reducedDims = "IterativeLSI"
+)
+```
+
+This is the **stronger and preferred** version when scRNA-seq is available. The `GeneIntegrationMatrix` contains actual RNA expression values imputed from the scRNA-seq integration (Chapter 10), rather than gene activity scores inferred from chromatin alone.
+
+Notice it tests **798 mappings** vs 825 for the gene score version — slightly fewer because some TF genes present in the gene score model are absent from the RNA dataset.
+
+Key differences you'll see in the output:
+- Some entries have `cor = NA` and `padj = NA` (e.g. TFDP3, ZIC3, SOX3) — these genes had insufficient variance in the RNA data to compute a meaningful correlation
+- HES4 and HES5 show **negative correlations** (`cor ≈ −0.4`) — their motif accessibility is inversely related to their expression, meaning they may act as repressors rather than activators
+
+---
+
+### Step 3 — Add maxDelta to the Correlation DataFrames
+
+```r
+corGSM_MM$maxDelta <- rowData(seZ)[match(corGSM_MM$MotifMatrix_name, rowData(seZ)$name), "maxDelta"]
+corGIM_MM$maxDelta <- rowData(seZ)[match(corGIM_MM$MotifMatrix_name, rowData(seZ)$name), "maxDelta"]
+```
+
+This joins the maxDelta computed in Step 1 back onto the correlation results using the motif name as the key. Now each TF row has three pieces of information needed for the final filter: correlation, significance, and variability.
+
+---
+
+### Step 4 — Define and Identify Positive Regulators
+
+Positive regulators are considered as those TFs whose correlation between motif and gene score (or gene expression) is greater than 0.5 with an adjusted p-value less than 0.01 and a maximum inter-cluster difference in deviation z-score that is in the top quartile.
+
+```r
+corGSM_MM <- corGSM_MM[order(abs(corGSM_MM$cor), decreasing = TRUE), ]
+corGSM_MM <- corGSM_MM[which(!duplicated(gsub("\\-.*","",corGSM_MM[,"MotifMatrix_name"]))), ]
+corGSM_MM$TFRegulator <- "NO"
+corGSM_MM$TFRegulator[which(
+  corGSM_MM$cor > 0.5 & 
+  corGSM_MM$padj < 0.01 & 
+  corGSM_MM$maxDelta > quantile(corGSM_MM$maxDelta, 0.75)
+)] <- "YES"
+```
+
+The three filtering steps explained:
+
+**1. Sort by absolute correlation** — ensures that when duplicates are removed next, the strongest-correlated motif per TF family is retained.
+
+**2. Deduplicate by motif family** — the regex `gsub("\\-.*","",...)` strips suffixes (e.g. `GATA1_383` → `GATA1`). This prevents the same TF from appearing multiple times due to multiple motif entries in the database.
+
+**3. Three-part filter for YES:**
+
+| Criterion                    | Threshold                | Rationale                                               |
+| ---------------------------- | ------------------------ | ------------------------------------------------------- |
+| `cor > 0.5`                  | Pearson r > 0.5          | Moderate-to-strong positive correlation                 |
+| `padj < 0.01`                | FDR < 1%                 | Statistically robust                                    |
+| `maxDelta > 75th percentile` | Top quartile variability | TF must show cell-type-differential motif accessibility |
+
+#### Positive Regulators from Gene Scores (44 TFs):
+The list includes biologically compelling hits: GATA1/2 (erythroid), CEBPA/B/D (myeloid), EBF1/PAX5 (B cell), SPI1/ETS1 (pan-hematopoietic), TAL1 (erythroid/progenitor), LEF1 (T cell). This is a strong positive control — all known master regulators of their respective lineages emerge from an unbiased analysis.
+
+#### Positive Regulators from Gene Integration/RNA (45 TFs):
+An overlapping but distinct list, adding ATF4, BACH1, FOS/FOSB/FOSL1/FOSL2 (AP-1 family), CTCF, RUNX1, STAT2, IRF3/9. The AP-1 factors are particularly notable — they are often missed in gene score-based analysis because they're expressed broadly but at varying levels, and the RNA measurement captures this better than chromatin-inferred scores.
+
+---
+
+### The Dot Plots
+
+Both analyses produce the same style of visualization:
+
+```r
+p <- ggplot(data.frame(corGSM_MM), aes(cor, maxDelta, color = TFRegulator)) +
+  geom_point() +
+  geom_vline(xintercept = 0, lty = "dashed") +
+  scale_color_manual(values = c("NO"="darkgrey", "YES"="firebrick3")) +
+  xlab("Correlation To Gene Score") +
+  ylab("Max TF Motif Delta")
+```
+
+#### How to read these plots:
+
+![alt text](image-61.png)
+
+```
+Max TF         High variability
+Motif     │        ●  ● (YES - red)
+Delta     │     ●●●●●●
+(y-axis)  │   ●●●●●●●●●●
+          │●●●●●●●●●●●●●●●●●●●
+          │
+Low       │●●●●●●●●●●●●●●●●●●●●●●
+variability│
+          └──────────┬──────────→
+                     0    Correlation (x-axis)
+              Negative  Positive
+```
+
+- **Top-right quadrant** (high maxDelta + positive correlation) → **red dots = positive regulators**
+- **Top-left quadrant** (high maxDelta + negative correlation) → potential **repressors** — interesting but not called positive regulators here
+- **Bottom band** (low maxDelta) → motifs that don't vary much between cell types — filtered out regardless of correlation
+- **Vertical dashed line at 0** — divides positive from negative correlation
+
+The 204 rows removed as warnings in the GIM version are TFs with `NA` correlation values (due to insufficient RNA variance), which fall outside the plot scale.
+
+---
+
+### Summary of the Full Workflow
+
+```
+chromVAR MotifMatrix (z-scores)
+          ↓
+    getGroupSE() → per-cluster motif deviations
+          ↓
+    compute maxDelta per motif
+          ↓
+correlateMatrices()
+  ├── GeneScoreMatrix × MotifMatrix  → 825 TF-motif pairs
+  └── GeneIntegrationMatrix × MotifMatrix → 798 TF-motif pairs
+          ↓
+    Add maxDelta, filter:
+    cor > 0.5, padj < 0.01, maxDelta > Q75
+          ↓
+  ┌─────────────────────────────────────┐
+  │ Gene Score: 44 positive regulators  │
+  │ Gene RNA:   45 positive regulators  │
+  └─────────────────────────────────────┘
+          ↓
+    Dot plot: cor vs maxDelta
+    (red = positive regulator)
+```
+
+> The key conceptual advance of this chapter over chromVAR alone is the **requirement for concordance between chromatin and expression**. A TF motif that becomes accessible in a cell type but whose gene is not expressed there is unlikely to be the driver — it could be a passenger effect, a related family member, or indirect remodeling. By demanding that the TF's own activity (gene score or RNA) tracks with its motif accessibility, ArchR identifies the most likely causal regulators of cell-type-specific chromatin states.
