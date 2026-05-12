@@ -3993,3 +3993,1036 @@ These plots visualize the predicted expression of the transcription factor genes
 
     PAX5 & EBF1: These show nearly identical patterns in the top and upper-left clusters.
 
+## 14. 1 Motif footprinting
+
+In an ATAC-seq experiment, the Tn5 transposase cuts open DNA. However, if a transcription factor is physically bound to a specific piece of DNA, it acts like a shield. The Tn5 cannot cut the DNA underneath the protein.
+
++ The Footprint: This results in a localized "dip" in accessibility (the footprint) surrounded by high accessibility where the DNA was unprotected.
+
++ The Goal: By aggregating these signals across thousands of sites, we can visualize the precise binding architecture of a TF.
+
+#### Before ArchR can look for these footprints, it needs a map of every possible location where a specific TF might bind.
+```r 
+# Obtain the genomic coordinates for all motifs in the CIS-BP set
+motifPositions <- getPositions(projHeme5)
+```
+
+```r
+motifPositions
+``` 
++ How it works: This function scans the genome for the DNA sequences that match your motifs (e.g., searching for every instance of the GATA1 "Wanted Poster").
+
++ The Output: It creates a GRangesList. Each element in this list is a specific TF, containing the chromosome (seqnames), the exact coordinates (ranges), and the orientation (strand) for every single time that motif appears in the genome.
+
++ The Score: The score column tells you how well that specific genomic sequence matches the "ideal" version of the motif.
+
+### Context for Atrial Fibrillation (AFib) Research
+
+For your AFib thesis, footprinting is your most precise tool for proving a TF's involvement:
+
+    Physical Proof: While a motif deviation score tells you a TF might be active, a clean footprint proves the protein was physically there, occupying the DNA in your heart cells.
+
+    SNP Interference: If you have a GWAS risk variant in an enhancer, you can use footprinting to see if that mutation physically prevents a TF (like GATA4 or PITX2) from sitting on its binding site. You would see a strong footprint in healthy cells, but a shallow or missing footprint in diseased cells.
+
+    TF-TF Interaction: Footprinting can sometimes reveal "flanking" signals, showing if two proteins are binding side-by-side to regulate a heart rhythm gene.
+
+
+## 16.1.2 Preparing and Executing Motif Footprinting
+
+To generate high-resolution footprinting profiles, ArchR must first identify the exact genomic "addresses" of your motifs and ensure that aggregate data (Group Coverages) is available for the clusters you wish to compare.
+1. Filtering Target Motifs
+
+The first block of code selects specific transcription factors (TFs) of interest and matches them to the official full names in the ArchR database (e.g., matching "GATA1" to "GATA1_383").
+```r 
+# 1. Define the short names of the TFs of interest
+motifs <- c("GATA1", "CEBPA", "EBF1", "IRF4", "TBX21", "PAX5")
+
+# 2. Search the motifPositions object for the full internal names
+markerMotifs <- unlist(lapply(motifs, function(x) grep(x, names(motifPositions), value = TRUE)))
+
+# 3. Manually remove unwanted partial matches (e.g., SREBF1 which contains 'EBF1')
+markerMotifs <- markerMotifs[markerMotifs %ni% "SREBF1_22"]
+
+markerMotifs
+```
+
+The Logic: ArchR stores motifs with numerical suffixes. This code uses grep to find all entries that contain your target names and stores them in markerMotifs.
+
+The Exclusion: The %ni% (not in) operator is used to remove "SREBF1_22," which is a distinct factor from EBF1 but was caught by the broad search.
+
+
+### Ensuring Group Coverages
+
+Footprinting cannot be performed on individual cells; it requires the combined signal from all cells in a cluster (pseudobulk).
+
+```r
+if(is.null(projHeme5@projectMetadata$GroupCoverages$Clusters2)){
+    projHeme5 <- addGroupCoverages(ArchRProj = projHeme5, groupBy = "Clusters2")
+}
+```
+The Logic: This checks if "GroupCoverages" have already been calculated for your project.
+
+The Action: If they are missing, it runs addGroupCoverages, which creates the underlying files ArchR needs to aggregate the footprint signal across your clusters.
+
+### Calculating the Footprints (getFootprints)
+
+This core command calculates the Tn5 displacement profiles at the specific motif sites identified in the previous steps.
+
+```r
+seFoot <- getFootprints(
+  ArchRProj = projHeme5, 
+  positions = motifPositions[markerMotifs], 
+  groupBy = "Clusters2"
+)
+```
+    positions: Directs ArchR to the specific genomic coordinates where these TFs are predicted to bind.
+
+    groupBy: Specifies the metadata column (e.g., "Clusters2") used to aggregate the signal.
+
+### Troubleshooting: The "BSgenomeViews" Error
+
+As seen in the log, you may encounter an error: could not find function "BSgenomeViews".
+
+The Cause:
+ArchR performs a K-mer bias correction to ensure the "dip" in a footprint is caused by a protein sitting on the DNA and not just by the Tn5 enzyme preferring certain DNA sequences. To do this, it must use the BSgenome package to read the actual DNA nucleotides (A, T, C, G) at those positions.
+
+The Fix:
+You must load the BSgenome library before running the command:
+
+```r 
+#Load the missing dependency
+library(BSgenome)
+```
+```r 
+# Now re-run the getFootprints command
+seFoot <- getFootprints(...)
+```
+
+Peer Tip: Footprinting is computationally heavy because it calculates signal at every single binding site. By subsetting to only your `markerMotifs` instead of all 800+ motifs, you significantly reduce the time and memory required for the analysis.
+
+## 16.2 Normalization of Footprints for Tn5 Bias
+
+One major challenge with TF footprinting using ATAC-seq data is the insertion sequence bias of the Tn5 transposase which can lead to misclassification of TF footprints. To account for Tn5 insertion bias, ArchR identifies the k-mer (user-defined length, default length 6) sequences surrounding each Tn5 insertion site. To do this analysis, ArchR identifies single-base resolution Tn5 insertion sites for each pseudo-bulk, resizes these 1-bp sites to k-bp windows (-k/2 and + (k/2 - 1) bp from insertion), and then creates a k-mer frequency table using the oligonucleotidefrequency(w=k, simplify.as="collapse") function from the Biostrings package. ArchR then calculates the expected k-mers genome-wide using the same function with the BSgenome-associated genome file. To calculate the insertion bias for a pseudo-bulk footprint, ArchR creates a k-mer frequency matrix that is represented as all possible k-mers across a window +/- N bp (user-defined, default 250 bp) from the motif center. Then, iterating over each motif site, ArchR fills in the positioned k-mers into the k-mer frequency matrix. This is then calculated for each motif position genome-wide. Using the sample’s k-mer frequency table, ArchR can then compute the expected Tn5 insertions by multiplying the k-mer position frequency table by the observed/expected Tn5 k-mer frequency.
+
+All of this happens under the hood within the `plotFootprints()` function.
+
+## Subtract vs. Divide Tn5 Bias Normalization
+
+These two methods answer the same question — *"how much does observed insertion deviate from Tn5 sequence bias?"* — but use different math, which has real consequences for interpretation.
+
+---
+
+### The Math
+
+|                          | Subtract              | Divide                |
+| ------------------------ | --------------------- | --------------------- |
+| **Formula**              | `Observed − Expected` | `Observed / Expected` |
+| **Result type**          | Absolute difference   | Fold-change ratio     |
+| **Baseline (no effect)** | 0                     | 1                     |
+| **Protected site**       | Negative value        | Value < 1             |
+| **Accessible flanks**    | Positive value        | Value > 1             |
+
+---
+
+### Conceptual Difference
+
+**Subtract** asks:
+> *"How many more (or fewer) insertions did I get than expected?"*
+- Produces an **additive deviation** from baseline
+- Sensitive to absolute insertion depth
+- Negative values are meaningful and interpretable (as you saw in TBX21)
+
+**Divide** asks:
+> *"How many times more (or fewer) insertions did I get than expected?"*
+- Produces a **multiplicative ratio** relative to baseline
+- Naturally accounts for regions where Tn5 cuts very rarely or very frequently
+- Similar conceptually to a log-fold-change in RNA-seq
+
+---
+
+### Key Practical Differences
+
+#### 1. Behavior at Low-Bias Regions
+This is the most important difference:
+
+```
+Imagine a region where Expected insertions = 2, Observed = 4
+
+Subtract:  4 - 2 = +2
+Divide:    4 / 2 = 2x enrichment
+
+Now imagine Expected = 0.1, Observed = 0.2 (same fold-change, different scale)
+
+Subtract:  0.2 - 0.1 = +0.1  ← looks tiny
+Divide:    0.2 / 0.1 = 2x    ← correctly shows same enrichment
+```
+
+- **Divide** is better at detecting footprints at motifs where Tn5 **rarely cuts** by nature
+- **Subtract** can underestimate signal at low-bias motifs
+
+#### 2. Behavior at High-Bias Regions
+```
+Expected = 100, Observed = 105
+
+Subtract:  105 - 100 = +5    ← looks like real signal
+Divide:    105 / 100 = 1.05x ← correctly shows almost no enrichment
+```
+
+- **Subtract** can produce spuriously large values at high-bias motifs
+- **Divide** is more robust here — a small absolute difference at high baseline is correctly identified as negligible
+
+#### 3. Noise Amplification
+- **Divide** is sensitive to near-zero expected values — if the Tn5 bias is very low at a position, dividing can create extreme ratios from random noise
+- **Subtract** is more numerically stable in these edge cases
+
+#### 4. Interpretability of Y-axis
+
+| Method   | Y-axis meaning                                      |
+| -------- | --------------------------------------------------- |
+| Subtract | Raw insertion count units (e.g., per-million reads) |
+| Divide   | Ratio/fold-enrichment (unitless)                    |
+
+Subtract plots are more **intuitive** for comparing absolute signal across cell types. Divide plots are more **scale-invariant** across different motifs.
+
+---
+
+### When to Use Which
+
+| Situation                                             | Recommended method                                          |
+| ----------------------------------------------------- | ----------------------------------------------------------- |
+| Comparing footprints **across cell types** for one TF | Either works; Subtract is more intuitive                    |
+| Comparing footprints **across different TFs**         | **Divide** — normalizes for motif-specific bias differences |
+| TF motif has **extreme Tn5 bias** (very high or low)  | **Divide** — more robust to bias magnitude                  |
+| You want interpretable absolute signal values         | **Subtract**                                                |
+| Exploratory analysis, first pass                      | **Subtract** (easier to interpret negative values)          |
+
+---
+
+### What to Expect Visually
+
+**Subtract plots** (what you already have):
+- Y-axis centered around **0**
+- Negative values possible and meaningful
+- Amplitude reflects absolute insertion differences
+
+**Divide plots**:
+- Y-axis centered around **1**
+- Values below 1 = protection, above 1 = accessibility
+- Shape of footprint similar, but relative heights between cell types may shift
+- Motifs with very different Tn5 preferences will look more **comparable to each other**
+
+---
+
+### Summary
+
+> **Subtract** gives you an additive deviation — good for intuitive interpretation and within-TF comparisons across cell types. **Divide** gives you a multiplicative fold-change — better for comparing across TFs with different sequence biases and for motifs at the extremes of Tn5 preference. In practice, **both should give the same biological conclusions** for a well-behaved footprint like TBX21 — if they disagree, that's a signal worth investigating.
+
+![alt text](image-52.png)
+
+![alt text](image-53.png)
+
+
+## Chapter 16.3: Feature Footprinting — Detailed Explanation
+
+This chapter extends the footprinting concept beyond transcription factor motifs to **any genomic feature you define**. The worked example uses the **TSS (Transcription Start Site)** insertion profile.
+
+---
+
+### Core Concept: What is Feature Footprinting?
+
+In chapters 16.1 and 16.2 you did **motif footprinting** — asking "is a TF bound at its sequence motif?". Feature footprinting is more general:
+
+> "ArchR enables footprinting of any user-defined feature set"
+
+Instead of TF motif positions, you can pass **any set of genomic coordinates** — TSS positions, enhancers, CTCF sites, repeat elements, custom peaks, etc. — and ask: *what does the Tn5 insertion pattern look like around these features, per cell type?*
+
+The TSS example is deliberately chosen because it's a well-understood, biologically clean feature with a known expected pattern.
+
+---
+
+### Step-by-Step Walkthrough
+
+#### Step 1 — Ensure Group Coverages Exist
+
+```r
+if(is.null(projHeme5@projectMetadata$GroupCoverages$Clusters2)){
+  projHeme5 <- addGroupCoverages(ArchRProj = projHeme5, groupBy = "Clusters2")
+}
+```
+
+This is a prerequisite check. Footprinting is performed using group coverage files which are derived from pseudo-bulk replicates, originally created to perform peak calling. The `if` guard avoids recomputing them if they already exist — important because generating coverages is computationally expensive.
+
+---
+
+#### Step 2 — Compute the Footprint with `getFootprints()`
+
+```r
+seTSS <- getFootprints(
+  ArchRProj = projHeme5,
+  positions = GRangesList(TSS = getTSS(projHeme5)),
+  groupBy = "Clusters2",
+  flank = 2000
+)
+```
+
+Key arguments to understand:
+
+| Argument                | What it does                                                                        |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `positions`             | A `GRangesList` of genomic coordinates — here TSS positions fetched with `getTSS()` |
+| `groupBy = "Clusters2"` | Computes separate profiles for each cell cluster                                    |
+| `flank = 2000`          | Extends the window **2000 bp** on either side of each feature center                |
+
+The `flank = 2000` is a deliberate choice here — the main difference from previous analyses is specifying `flank = 2000` to extend these footprints 2000 bp on either side of each TSS. This is much wider than the ±200 bp used for TF motifs, because TSS profiles capture broader chromatin architecture (nucleosome phasing, NDR).
+
+The log output shows what happens internally:
+1. **Kmer Bias Table** is computed (~0.2 min) — the Tn5 sequence preference model
+2. **Footprints** are computed (~0.3 min) — raw insertion counts per position
+3. **Footprint Bias** is computed (~0.3 min) — expected insertions given sequence context
+4. **Summarization** — combining across all TSS sites
+
+---
+
+#### Step 3 — Plot with `plotFootprints()`
+
+```r
+plotFootprints(
+  seFoot = seTSS,
+  ArchRProj = projHeme5,
+  normMethod = "None",
+  plotName = "TSS-No-Normalization",
+  addDOC = FALSE,
+  flank = 2000,
+  flankNorm = 100
+)
+```
+
+New arguments compared to what you've seen before:
+
+| Argument              | Meaning                                                     |
+| --------------------- | ----------------------------------------------------------- |
+| `normMethod = "None"` | No Tn5 bias subtraction or division — raw signal            |
+| `flank = 2000`        | Must match the window used in `getFootprints()`             |
+| `flankNorm = 100`     | Normalizes the profile to the outermost 100 bp on each side |
+
+**Why `normMethod = "None"` for TSS?**
+
+The TSS footprint is interpreted differently from TF footprints:
+- You're not looking for a protection dip from a bound protein
+- You're looking for the **nucleosome-depleted region (NDR)** and **nucleosome phasing** pattern
+- The raw insertion pattern itself is biologically meaningful — high insertions at the NDR, periodic peaks from phased nucleosomes
+- Subtracting Tn5 bias would distort this landscape rather than clarify it
+
+**What `flankNorm = 100` does:**
+
+The profile is normalized to the average insertion rate in the outermost 100 bp flanking regions (i.e., positions ~1900–2000 bp away from the TSS). These distant flanks represent "background" chromatin with no TSS-specific structure. Setting them to 1.0 allows all cell types to be compared on the same relative scale regardless of sequencing depth differences.
+
+---
+
+### What the TSS Plot Shows
+
+The resulting plot has a characteristic shape:
+
+![alt text](image-54.png)
+
+## Interpreting Your TSS Feature Footprinting Plot
+
+This is a two-panel TSS insertion profile.
+
+---
+
+### Top Panel — Raw Normalized Insertions
+
+The y-axis goes from ~1 to ~23, normalized to the flanking background (= 1).
+
+#### What you see:
+- A **very sharp, tall peak at position 0** (the TSS) reaching ~23x above background
+- A **steep asymmetry** — the peak drops off more gradually on the +1 side (downstream/gene body) than the -1 side (upstream/promoter)
+- All cell types converge to ~1–2 at the flanks (±2000 bp), confirming flank normalization is working correctly
+- **Cell type stratification is visible** — some lines peak much higher than others
+
+#### Cell type hierarchy at the peak (top to bottom):
+| Rank     | Cell Type                         | Interpretation                                           |
+| -------- | --------------------------------- | -------------------------------------------------------- |
+| Highest  | CD8.CM, CD4.M (dark blues/greens) | Mature T cells — highly transcriptionally active         |
+| Mid-high | B, PreB, CLP                      | Lymphoid lineage — active transcription programs         |
+| Mid      | GMP, Mono                         | Myeloid — moderate TSS accessibility                     |
+| Lower    | Erythroid, pDC                    | More restricted transcriptional programs                 |
+| Lowest   | Progenitor (cyan)                 | Broad but shallow accessibility — less lineage-committed |
+
+The **Progenitor** cells (cyan) are notable — they have the **flattest, widest profile**, which makes biological sense: progenitor chromatin is broadly open but not sharply focused at any particular TSS, reflecting transcriptional priming rather than active commitment.
+
+---
+
+### Bottom Panel — Tn5-Bias Normalized Insertions
+
+Y-axis ranges from 1.0 to ~2.25. All lines converge to exactly 1.0 at the flanks.
+
+#### What you see:
+- A much **smoother, broader peak** compared to the top panel
+- The peak reaches only ~2.0–2.25x above background — far less dramatic than the top panel's 23x
+- **Cell type differences are now cleaner and more separated**
+- The shape is more **symmetric** around position 0
+
+#### Why is this panel useful?
+The Tn5 bias normalization removes the sequence-driven insertion preference inherent to every TSS (because TSS sequences share compositional features). What remains is the **true chromatin accessibility signal** relative to background sequence bias.
+
+The fact that the bottom panel peaks at only ~2x while the top peaks at ~23x tells you that **most of the raw TSS signal is actually driven by Tn5 sequence preference** at GC-rich TSS regions — which is a known and expected artifact of ATAC-seq.
+
+---
+
+### Key Biological Observations
+
+**1. No nucleosome phasing visible — and that's expected**
+At ±2000 bp with this many diverse cell types overlaid, nucleosome phasing oscillations (~200 bp periodicity) are averaged out. You'd need to zoom in to ±1000 bp on a single cell type to see them clearly.
+
+**2. The asymmetry in the top panel is real biology**
+The slower drop-off on the +1 (downstream) side reflects **gene body accessibility** — open chromatin extends into actively transcribed genes. Cell types with the most transcriptional activity (T cells) show the most pronounced downstream accessibility.
+
+**3. Progenitor cells (cyan) stand out in both panels**
+- Top panel: relatively low peak despite broad accessibility
+- Bottom panel: among the **lowest** after bias correction
+
+This confirms that progenitor TSS accessibility is largely a sequence/bias effect rather than true focused transcriptional activity — a beautiful demonstration of why Tn5 bias correction matters.
+
+**4. CD8.CM (dark green) consistently highest**
+CD8 central memory T cells have the sharpest, tallest TSS profile, indicating highly focused and active transcription — consistent with their mature, committed identity.
+
+---
+
+### Data Quality Assessment
+
+This plot is an excellent QC indicator. Your data looks:
+
+| QC Metric              | Your Result                 | Verdict                         |
+| ---------------------- | --------------------------- | ------------------------------- |
+| Peak height (raw)      | ~23x                        | Excellent (>10x is good)        |
+| Peak sharpness         | Very sharp                  | High data quality               |
+| Flank convergence to 1 | Clean                       | Normalization working correctly |
+| Cell type separation   | Clear stratification        | Good cell coverage depth        |
+| Symmetry               | Slight asymmetry (expected) | Normal                          |
+
+> Overall, this is a **high-quality ATAC-seq dataset** with strong TSS enrichment, clean cell type separation, and biologically coherent patterns. The two panels together confirm that both the raw signal and the bias-corrected signal tell consistent stories about cell-type-specific chromatin accessibility at transcription start sites.
+---
+
+### Why TSS Footprinting Matters
+
+This analysis serves several purposes:
+
+**1. Quality Control** — A sharp TSS enrichment profile is one of the gold-standard QC metrics for ATAC-seq. Poor data shows a flat or noisy profile. This is why it was introduced during QC earlier in the ArchR workflow.
+
+**2. Cell Type Comparison** — Different cell types maintain different transcriptional programs. Comparing TSS profiles across clusters tells you which clusters have higher overall chromatin accessibility and transcriptional activity.
+
+**3. Proof of Concept for Custom Features** — The TSS example teaches you the generalized workflow: *any GRangesList → `getFootprints()` → `plotFootprints()`*. You could substitute enhancers, repeat elements, CTCF binding sites, or your own peak set.
+
+---
+
+### Key Differences from TF Motif Footprinting (Chapters 16.1/16.2)
+
+| Aspect             | TF Motif Footprinting       | Feature Footprinting (TSS)          |
+| ------------------ | --------------------------- | ----------------------------------- |
+| Input coordinates  | Motif scan positions        | Any GRanges (here: TSS)             |
+| Window size        | ±200 bp                     | ±2000 bp                            |
+| Normalization      | Subtract or Divide Tn5 bias | None                                |
+| Signal of interest | Protection dip at center    | NDR peak + nucleosome phasing       |
+| Purpose            | Detect TF binding           | Characterize chromatin architecture |
+| Baseline           | 0 (Subtract) or 1 (Divide)  | Flank-normalized to 1               |
+
+---
+
+### Summary
+
+> Chapter 16.3 generalizes footprinting from TF motifs to **any genomic feature**. Using TSS as the example, it demonstrates how `getFootprints()` with a wider `flank = 2000` window and `plotFootprints()` with `normMethod = "None"` produces chromatin architecture profiles. The TSS insertion profile serves double duty as both a quality control metric and a biologically informative view of cell-type-specific transcriptional accessibility — and the same workflow can be applied to any custom set of genomic coordinates you're interested in.
+
+# 17 Integrative Analysis with ArchR
+
+## 17.2. Co-accessibility with ArchR
+
+
+
+In linear DNA sequencing, genes and their regulators (enhancers) can be separated by massive genomic distances. Co-accessibility is the computational method ArchR uses to predict which distal enhancers are actually "talking" to which promoters by looking at their behavior across thousands of individual cells.
+
+Co-accessibility is defined as a correlation in accessibility between two genomic peaks.
+
++ The Logic: If Peak A (an enhancer) and Peak B (a promoter) are physically linked in 3D space to regulate a gene, they should open and close together.
+
++ The Observation: When you look across many single cells, if you find that every time Peak A is accessible, Peak B is also accessible, they are considered "co-accessible".
+
+### Breaking Down the Visualization
+ ![](image-55.png)
+
+
+The image illustrates this concept through three distinct lenses:
+
+The Single-Cell Tracks (Top):
+
+        The bars represent accessibility in individual cells of different types (A, B, and C).
+
+        Notice Promoter P and Enhancer E3: In every cell where the promoter is "open" (colored bars present), the E3 enhancer is also "open". They move in perfect sync.
+
+The Scatter Plot (Bottom Left):
+
+        This plot quantifies that "sync." The X-axis represents the accessibility of the Promoter, and the Y-axis represents Enhancer E3.
+
+        The dots (representing cells from different types) form a straight diagonal line, showing a strong positive correlation.
+
+The Correlation Matrix (Bottom Right):
+
+        This heatmap shows the relationship between all peaks in the region.
+
+        The Dark Red square at the intersection of P and E3 indicates their high correlation score. In contrast, E1 shows a Purple/Blue color when compared to P, meaning they are rarely open at the same time and likely do not work together.
+
+
+## Decoding the Co-Accessibility Output
+
+![alt text](image-56.png)
+
+When you run `getCoAccessibility`, ArchR performs a massive mathematical operation behind the scenes: it takes every single peak in your dataset and compares its accessibility profile across all cells to the peaks surrounding it. 
+
+Because `returnLoops = FALSE` was set, ArchR has given you the raw data version of this analysis. Here is exactly what those two output blocks mean.
+
+## 1. The `cA` DataFrame: The Connections List
+
+This first table is essentially a list of all the significant conversations happening between peaks. It has 97,800 rows, meaning ArchR found **97,800 statistically significant links** between different DNA regions.
+
+* **`queryHits` & `subjectHits`**: These are the ID numbers for the two peaks being compared. For example, Row 1 shows a connection between Peak 7 and Peak 9.
+* **`correlation`**: This is the strength of the link. Notice that all numbers are above **0.5**. This is because you set `corCutOff = 0.5` in your command, telling ArchR to throw away any weak or noisy connections.
+* **`FDR` (False Discovery Rate) & `Pval`**: The statistical significance of the correlation. The extremely tiny numbers (e.g., *1.8e-56*) indicate that it is highly unlikely these two peaks are opening together just by random chance.
+* **`Variability` & `VarQuantile`**: These metrics show how much the accessibility of these peaks varies across your cells. Co-accessibility requires variation to calculate a correlation—if a peak is open in 100% of cells, it cannot be correlated with anything.
+
+## 2. The Master Peak Map: `metadata(cA)[[1]]`
+
+The first table told you that "Peak 7" and "Peak 9" are connected, but what actually *is* Peak 7? That is what this second output provides.
+
+1. **The `GRanges` Object**: This is the master list of all 145,956 peaks in your entire ArchR project.
+2. **The Coordinates (`seqnames`, `ranges`)**: This gives you the exact physical location on the genome for every peak. 
+3. **How they connect**: The numbers in `queryHits` and `subjectHits` from the first table correspond to the row numbers in this `GRanges` list. So, to find out what "Peak 7" is, ArchR looks at the 7th row of this master map.
+4. **The Names (Mono, B, GMP)**: The row names here indicate which cell cluster that specific peak was originally identified in.
+
+### Data Overview Table
+
+| Output Component        | Data Type   | Purpose                                                | Key Fields                                       |
+| :---------------------- | :---------- | :----------------------------------------------------- | :----------------------------------------------- |
+| **`cA`**                | `DataFrame` | Lists all significant peak-to-peak correlations        | `queryHits`, `subjectHits`, `correlation`, `FDR` |
+| **`metadata(cA)[[1]]`** | `GRanges`   | Acts as the master map of all genomic peak coordinates | `seqnames`, `ranges`, `strand`                   |
+
+## How this applies to your AFib Thesis
+
+Right now, this is just a giant table of numbers. But in the context of Atrial Fibrillation, this table holds the answers to how genetic variants function. 
+
+If you identify a peak (e.g., Peak X) that contains an AFib GWAS mutation, you can search this table for Peak X's `queryHit`. The corresponding `subjectHit` might point directly to the promoter region of a critical cardiac ion channel gene. This table provides the mathematical proof that the mutated enhancer and the rhythm gene are functionally linked.
+
+> **Peer Tip**: You rarely need to read this raw table manually. Its primary purpose is to be fed directly into ArchR's plotting functions, which will automatically translate these `queryHits` and `subjectHits` into beautiful, curved lines (loops) on your genome browser tracks.
+
+
+
+## Analyzing Co-Accessibility Loops (`returnLoops = TRUE`)
+![alt text](image-57.png)
+
+By changing the parameter to `returnLoops = TRUE`, you have instructed ArchR to perform a crucial data transformation. It has converted the raw mathematical "connections list" into a **spatial object** that can be directly mapped onto the genome. 
+
+Here is exactly how this new output differs from the previous one.
+
+## 1. The Core Differences
+
+When `returnLoops = FALSE`, you received a raw table with 97,800 directional connections (Peak A -> Peak B, and Peak B -> Peak A). 
+
+By setting it to `TRUE`, the output `cA` has changed into a `GRangesList` (which is why you are viewing `cA[[1]]`). 
+
+* **Undirectional Consolidation**: Notice that the number of ranges is exactly **48,900**. ArchR has collapsed the redundant bi-directional connections into single, undirectional physical loops (exactly half of 97,800).
+* **Spatial Spans, Not Single Peaks**: In the previous table, coordinates belonged to single peaks. Here, the `ranges` column (e.g., `845649-856613`) represents the entire **genomic span of the loop**—from the exact position of the first peak to the exact position of the second peak.
+
+## 2. Breaking Down the New Structure
+
+The object now holds the spatial "bridges" between peaks, with all the statistical weight attached directly to them.
+
+| Component                  | What it represents                           | How it differs from before                                                                                                                 |
+| :------------------------- | :------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| **`seqnames` & `ranges`**  | The physical anchor points of the loop.      | Represents a span connecting two regions, rather than one isolated region.                                                                 |
+| **`correlation` to `FDR`** | The statistical strength of the connection.  | It is now attached directly to the spatial coordinates as "metadata."                                                                      |
+| **`value`**                | A normalized score based on the correlation. | **New Column**: This is specifically generated for ArchR's plotting engine to determine how thick or dark to draw the loop on your screen. |
+
+## 3. Why this matters for your Workflow
+
+You have effectively packaged your data for visualization. 
+
+1. **Browser Integration**: Standard genomic plotting tools cannot read "queryHit 7 is linked to subjectHit 9." They require explicit physical coordinates.
+2. **Drawing the Arcs**: Because this object contains the start, the end, and the `value` (strength) of the connection, you can feed this directly into `plotBrowserTrack()`. ArchR will use this object to draw the physical "arcs" connecting distant enhancers to their target promoters.
+
+> **Thesis Tip**: In the context of your Atrial Fibrillation research, this `GRangesList` is the exact object you will use to visually prove that an AFib-associated GWAS enhancer physically loops over to contact a heart rhythm gene. You are no longer just looking at a table; you have built the blueprint for a 3D genomic map.
+
+
+## Filtering Co-Accessibility Loops for High Confidence
+
+In this step, the raw co-accessibility loops generated by ArchR are rigorously filtered. Single-cell epigenetic data inherently contains statistical noise. This step applies strict mathematical thresholds to isolate only the most robust and biologically meaningful enhancer-promoter connections before visualization.
+
+### Step-by-Step Code Breakdown
+
+Here is exactly what the three lines of R code are executing to refine your data:
+
+```r
+# 1. Extract the GRanges object containing the spatial loops
+cALoops <- cA[[1]]
+
+# 2. Filter by extreme statistical significance (False Discovery Rate)
+cALoops <- cALoops[cALoops$FDR < 10^-10]
+
+# 3. Filter by minimum dynamic accessibility (Variability)
+cALoops <- cALoops[rowMins(cbind(cALoops$VarQuantile1, cALoops$VarQuantile2)) > 0.35]
+```
+
+| Filter Applied           | Code Parameter      | Statistical & Biological Meaning                                                                                                                                                                                                                  |
+| ------------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Statistical Significance | FDR < 10^-10        | This is an exceptionally strict threshold. It demands that the probability of these two peaks being correlated by random chance is less than 1 in 10 billion. It eliminates weak, coincidental co-accessibility.                                  |
+| Dynamic Variability      | rowMins(...) > 0.35 | Co-accessibility relies on observing changes across cells. If a peak is always open or always closed, its correlation is mathematically unreliable. This step requires that both peaks in the loop exhibit variability above the 35th percentile. |
+
+### 1. The T-Statistic (TStat)
+
+The `TStat` is a fundamental statistical metric used to determine if the correlation between two peaks is genuinely significant or just random background noise.
+
+* **Definition**: It is the calculated *T-statistic* from the mathematical correlation test. 
+* **Calculation**: It represents the ratio of the estimated correlation coefficient divided by its standard error. 
+* **Interpretation**: A higher absolute `TStat` value indicates that the observed correlation is highly significant and unlikely to be an artifact. This value is mathematically converted to generate the extremely low *P-values* and *FDR* scores seen in the output.
+
+### 2. The Peak Variability (Variability2)
+
+Co-accessibility analysis fundamentally relies on observing *dynamic changes* across different cell states. If a peak never changes—meaning it is statically open or closed in every single cell—it cannot be meaningfully correlated with another fluctuating peak.
+
+1. **Definition**: `Variability2` measures how dynamically the accessibility of the **second peak** (the `subjectHit` in the loop) fluctuates across all the cells or clusters in your dataset.
+2. **Counterpart**: There is also a `Variability1` column, which measures the exact same dynamic fluctuation for the **first peak** (the `queryHit`).
+3. **Biological Relevance**: ArchR calculates these scores to ensure that any regulatory loops it draws are connecting biologically active, dynamic regions (like a state-specific enhancer) rather than inactive genomic "deserts."
+
+## Summary Comparison Table
+
+Here is a quick reference table summarizing how these metrics function in the algorithm:
+
+| Metric           | Target             | Statistical / Biological Meaning                                                        | Filtering Role                            |
+| :--------------- | :----------------- | :-------------------------------------------------------------------------------------- | :---------------------------------------- |
+| **TStat**        | The *Relationship* | Measures the mathematical reliability and strength of the co-accessibility correlation. | Drives the strict `FDR` cutoffs.          |
+| **Variability2** | The *Second Peak*  | Measures how dynamically the DNA accessibility changes at this specific locus.          | Drives the `rowMins` variability cutoffs. |
+
+> **Analogy**: Imagine trying to prove two people are dancing together in a crowded room. **Variability2** proves that the second person is actually moving their feet. **TStat** provides the statistical proof that their movements are perfectly synchronized with the first person, rather than them just randomly dancing on their own.
+
+If you ever need to extract these specific values from your DataFrame programmatically to create custom plots, you would use standard R syntax:
+
+```r
+# Extracting the T-statistics for all loops
+t_statistics <- cA$TStat
+
+# Extracting the variability of the second peak (subjectHits)
+peak_2_var <- cA$Variability2
+```
+
+
+
+## Co-Accessibility with Custom Resolution
+
+![alt text](image-58.png)
+
+This step demonstrates how to calculate co-accessibility loops while applying a specific genomic resolution. By altering the parameters in the `getCoAccessibility` function, you change how ArchR physically groups the DNA before running the mathematical correlation tests.
+
+### The Code Modification
+
+The key difference in this command compared to previous steps is the addition of the `resolution` parameter:
+
+```r
+cA <- getCoAccessibility(
+  ArchRProj = projHeme5,
+  corCutOff = 0.5,
+  resolution = 1000, # The crucial change
+  returnLoops = TRUE
+)
+```
+
+### Understanding the Resolution Parameter
+
+* **Base-pair vs. Binned**: Previously, ArchR used the exact start and end coordinates of your ATAC-seq peaks. Here, setting `resolution = 1000` forces ArchR to snap those coordinates to the nearest 1,000 base pairs (1 kilobase) grid.
+* **The Binning Effect**: Instead of calculating "Is exact Peak A correlated with exact Peak B?", the algorithm is now calculating "Is the 1kb genomic region containing Peak A correlated with the 1kb genomic region containing Peak B?"
+
+## Analyzing the Output
+
+By examining the resulting `GRanges` object, you can see the direct physical effects of this 1kb binning strategy.
+
+1. **Rounded Genomic Coordinates**: Look closely at the `ranges` column. Instead of highly specific coordinate numbers, the ranges now end in neat 500s or 000s (e.g., `845500-856500`). The loop anchors have been standardized to the grid.
+2. **Total Loop Count**: The object contains **46,859** ranges. Consolidating adjacent peaks into shared 1kb bins slightly alters the total number of distinct connections compared to a high-resolution peak-to-peak analysis.
+3. **Preserved Metadata**: All essential statistical metrics (`correlation`, `FDR`, `Variability`, `value`) remain attached to these binned coordinates, ensuring the object is still fully compatible with ArchR's visualization tools.
+
+### Why Use a 1000bp Resolution?
+
+Applying a custom resolution is a strategic choice depending on the scale of the biology you are trying to observe.
+
+| Purpose                       | Biological & Computational Benefit                                                                                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Smoothing Technical Noise** | ATAC-seq peak boundaries can artificially shift between cells. Binning to 1kb creates a larger "landing pad" that absorbs minor boundary fluctuations.          |
+| **Computational Efficiency**  | Calculating pairwise correlations across millions of exact peaks requires massive memory. Grouping them into 1kb bins speeds up the mathematical operations.    |
+| **Macro-Level Viewing**       | When zooming out to look at massive genomic neighborhoods spanning hundreds of kilobases, 1kb resolution loops produce a cleaner, less visually cluttered plot. |
+
+> **Thesis Tip**: If you are trying to pinpoint the exact binding site of an AFib GWAS SNP, you want exact peak resolution (`resolution = 1`) to be as precise as possible. However, if you are creating a broad figure for your dissertation showing the overall regulatory architecture surrounding a major heart gene, using `resolution = 1000` or higher will generate smoother, more easily interpretable chromatin arcs.
+
+
+
+## Visualizing Co-Accessibility on Genome Browser Tracks
+
+## The Objective of Your Code
+
+You have successfully combined your ATAC-seq coverage data, peak calls, and co-accessibility calculations into a single, comprehensive visualization. This step bridges the gap between raw statistical tables and biological interpretation, allowing you to visually prove enhancer-promoter interactions.
+
+## Step-by-Step Breakdown of Your Actions
+
+### 1. Defining the Target Loci
+You first created a vector named `markerGenes`. By selecting known marker genes for Early Progenitors (*CD34*), Erythroid cells (*GATA1*), B-Cells (*PAX5*, *MS4A1*), Monocytes (*CD14*), and T-Cells (*CD3D*, etc.), you instructed ArchR exactly which genomic neighborhoods to prepare.
+
+### 2. Generating the Browser Tracks
+You then called the `plotBrowserTrack()` function to build the visualizations. 
+
+```r
+p <- plotBrowserTrack(
+    ArchRProj = projHeme5,
+    groupBy = "Clusters2",
+    geneSymbol = markerGenes,
+    upstream = 50000,   # Look 50kb upstream for distal enhancers
+    downstream = 50000, # Look 50kb downstream
+    loops = getCoAccessibility(projHeme5) # Inject the correlation loops
+)
+
+```
+
+By expanding the viewing window by **50,000 base pairs** (`upstream` and `downstream`), you ensured that distal regulatory elements were captured in the frame. Crucially, providing the `loops` argument mapped the mathematical correlation data directly onto these coordinates.
+
+### 3. Plotting a Specific Gene
+
+Because `p` is a list of plots (one for each marker gene), you used the `grid` package to draw the specific track for **CD14**, your Monocyte marker.
+
+## Decoding the CD14 Browser Track
+
+![](image-59.png)
+
+The resulting image is a multi-layered map of the *CD14* genomic locus. Here is how to interpret the different tiers of the plot:
+
+| Plot Track          | Visual Element              | Biological Interpretation                                                                                                                                                                                      |
+| ------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Coverage**        | Colored histogram peaks     | Shows where the DNA is open. Notice that the **Mono** (Monocyte) track has distinct, high-accessibility peaks far to the left (upstream) of the gene that are mostly flat in other lineages like B or T cells. |
+| **Peaks**           | Red tick marks              | Indicates regions that ArchR officially called as statistically significant consensus peaks across the whole dataset.                                                                                          |
+| **CoAccessibility** | Blue and purple curved arcs | Represents the physical "bridges" or loops. Darker purple lines indicate a stronger correlation (`value`). They visually connect the upstream distal enhancers directly to the region near the *CD14* gene.    |
+| **Genes**           | Blue and red blocks         | The physical location and exon/intron structure of the genes, with *CD14* in light blue.                                                                                                                       |
+
+> **Thesis Tip**: This exact type of plot is the "crown jewel" for a dissertation involving GWAS and ATAC-seq. If you replace *CD14* with an Atrial Fibrillation gene (like *PITX2*), and one of those upstream red "Peaks" contains your AFib SNP, the blue CoAccessibility loops provide the physical evidence that the mutated enhancer directly controls the heart rhythm gene.
+
+
+## 17.3: Peak2GeneLinkage with ArchR 
+
+
+
+### What is Peak-to-Gene Linkage?
+
+The primary difference between peak-to-gene links and co-accessibility is that co-accessibility is an ATAC-seq-only analysis that looks for correlations in accessibility between two peaks, while peak-to-gene linkage leverages integrated scRNA-seq data to look for correlations between peak accessibility and gene expression.
+
+In plain terms:
+
+| Method           | Data used      | What it correlates                          |
+| ---------------- | -------------- | ------------------------------------------- |
+| Co-accessibility | scATAC only    | Peak A accessibility ↔ Peak B accessibility |
+| Peak2Gene        | scATAC + scRNA | Peak accessibility ↔ Gene expression        |
+
+Because peak-to-gene linkage correlates scATAC-seq and scRNA-seq data, these links are often thought of as more relevant to gene regulatory interactions. This makes them more biologically interpretable — you're not just seeing two open regions correlated, you're seeing that a specific open chromatin region is predictive of a gene actually being expressed.
+
+---
+
+### Step 1 — Computing Links with `addPeak2GeneLinks()`
+
+```r
+projHeme5 <- addPeak2GeneLinks(
+    ArchRProj = projHeme5,
+    reducedDims = "IterativeLSI"
+)
+```
+
+The log output reveals the full internal workflow:
+
+
+
+
+**1. Filter low-quality cells** — 1,671 cells (15,7%) are removed because their RNA-ATAC integration prediction scores are too low to be trusted for correlation analysis.
+
+**2. KNN (K-Nearest Neighbors)** — cells are grouped by similarity in the reduced-dimension space (`IterativeLSI`). This is the same aggregation strategy used for co-accessibility — individual cells have too sparse a signal to correlate reliably, so similar cells are pooled.
+
+**3. Non-overlapping KNN pairs → 492 groupings** — the algorithm identifies 492 pseudo-bulk groups of cells that are used as the unit of analysis. Each grouping has both an ATAC profile and an RNA profile.
+
+**4. Group matrices** — separate ATAC (peak accessibility) and RNA (gene expression) matrices are built for each of the 492 groupings and normalized.
+
+**5. Peak-gene pairing** — for each gene, all peaks within a defined genomic window are identified as candidate pairs to test.
+
+**6. Correlation** — Pearson correlations are computed between each peak's accessibility profile and each gene's expression profile across the 492 groupings, with FDR correction.
+
+---
+
+### Step 2 — Retrieving Links with `getPeak2GeneLinks()`
+
+```r
+p2g <- getPeak2GeneLinks(
+    ArchRProj = projHeme5,
+    corCutOff = 0.45,
+    resolution = 1,
+    returnLoops = FALSE
+)
+```
+
+Key parameters:
+
+| Parameter             | Meaning                                                  |
+| --------------------- | -------------------------------------------------------- |
+| `corCutOff = 0.45`    | Only return links with Pearson r ≥ 0.45                  |
+| `resolution = 1`      | Single-base resolution — exact peak center to exact TSS  |
+| `returnLoops = FALSE` | Return a flat DataFrame instead of a GRanges loop object |
+
+The result is a DataFrame with **36046 peak-gene links** and 6 columns:
+
+| Column        | Meaning                                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `idxATAC`     | Row index of the peak in the peakSet                                                                        |
+| `idxRNA`      | Row index of the gene in the geneSet                                                                        |
+| `Correlation` | Pearson r (all ≥ 0.45 by the cutoff used)                                                                   |
+| `FDR`         | False discovery rate — extremely small values (e.g. 6.46e-47) indicating very strong statistical confidence |
+| `VarQATAC`    | Quantile of variance for this peak across groups — how variable is this peak's accessibility                |
+| `VarQRNA`     | Quantile of variance for this gene's expression across groups                                               |
+
+The `VarQ` columns are important — they tell you whether a link is driven by genuinely variable features. A `VarQATAC = 0.875` means that peak is in the top 12.5% most variable peaks, making the correlation more meaningful than one driven by a constitutively flat signal.
+
+---
+
+### Step 3 — Understanding the Index System
+
+`idxATAC` and `idxRNA` refer to the row indices of the peak or gene in the corresponding `geneSet` or `peakSet`, which can be accessed via the metadata component of the `p2g` object.
+
+There is an important gotcha here: it is important not to confuse `idxRNA` with the value in the `idx` column of the `geneSet`. Within the `geneSet`, `idx` corresponds to the chronological position of the given gene across each chromosome. As such, `idx` is only unique across an individual chromosome and is not relevant for mapping `idxRNA` to a gene name.
+
+To add human-readable gene names and peak coordinates to the DataFrame:
+
+```r
+p2g$geneName <- mcols(metadata(p2g)$geneSet)$name[p2g$idxRNA]
+p2g$peakName <- (metadata(p2g)$peakSet %>% 
+  {paste0(seqnames(.), "_", start(.), "_", end(.))})[p2g$idxATAC]
+```
+
+This uses the `idxRNA` and `idxATAC` as direct positional indices into the `geneSet` and `peakSet` GRanges objects respectively. The resulting DataFrame now shows human-readable rows like `SAMD11 ↔ chr1_779897_780397`.
+
+The `metadata()` also stores paths to the underlying `SummarizedExperiment` objects (`seATAC` and `seRNA`) — these represent `SummarizedExperiment` objects for the ATAC-seq and RNA-seq data used to identify peak-to-gene linkages, and each includes both the raw and normalized data matrices used in the analysis. These are useful if you want to go back and inspect the actual data that drove a specific correlation.
+
+---
+
+### Step 4 — The `resolution` Parameter and `returnLoops`
+
+If `returnLoops = TRUE`, then `getPeak2GeneLinks()` will return a loop track `GRanges` object that connects the peak and gene. The start and end of the `IRanges` object represent the position of the peak and gene being linked. When `resolution = 1`, this links the center of the peak to the single-base TSS of the gene.
+
+The resolution parameter affects both the coordinate precision and the total number of links returned by merging nearby overlapping links:
+
+| Resolution | Links returned | Use case                                         |
+| ---------- | -------------- | ------------------------------------------------ |
+| `1`        | 36,002         | Maximum precision, every peak-gene pair distinct |
+| `1000`     | 34,798         | Nearby peaks merged into 1kb bins                |
+| `10000`    | 28,219        | Aggressive merging into 10kb bins                |
+
+Decreasing the resolution is primarily useful for plotting the links as browser tracks because there are instances where many nearby peaks all link to the same gene and this can be difficult to visualize.
+
+---
+
+## Plotting Browser Tracks with Peak-to-Gene Links
+
+This section overlays the peak-to-gene links onto genome browser-style tracks, one of the most visually informative outputs in ArchR.
+
+---
+
+#### Defining Marker Genes
+
+```r
+markerGenes <- c(
+    "CD34",              # Early Progenitor
+    "GATA1",             # Erythroid
+    "PAX5", "MS4A1",     # B-Cell Trajectory
+    "CD14",              # Monocytes
+    "CD3D", "CD8A", "TBX21", "IL7R"  # T Cells
+)
+```
+
+These 9 genes are deliberately chosen to span the full hematopoietic landscape — from the earliest progenitor (CD34) down to lineage-committed mature cells. This is a best-practice design: you want markers that are both cell-type specific and well-validated in the literature, so you can immediately judge whether the links make biological sense.
+
+---
+
+#### Running `plotBrowserTrack()`
+
+```r
+p <- plotBrowserTrack(
+    ArchRProj = projHeme5,
+    groupBy = "Clusters2",
+    geneSymbol = markerGenes,
+    upstream = 50000,
+    downstream = 50000,
+    loops = getPeak2GeneLinks(projHeme5)
+)
+```
+
+Key parameters explained:
+
+| Parameter                 | Value                          | Meaning                             |
+| ------------------------- | ------------------------------ | ----------------------------------- |
+| `groupBy`                 | `"Clusters2"`                  | One track per cell cluster          |
+| `upstream` / `downstream` | `50000`                        | Show 50 kb on each side of the gene |
+| `loops`                   | `getPeak2GeneLinks(projHeme5)` | Overlay P2G arcs on the track       |
+
+The `loops` argument is what makes this different from a standard browser track. It takes the `GRanges` loop object returned by `getPeak2GeneLinks()` and draws arcs connecting each linked peak to its target gene TSS. The arc width or color typically encodes the correlation strength.
+
+The log output shows the four-step build process for each of the 9 genes:
+```
+Adding Bulk Tracks    → per-cluster ATAC coverage signal
+Adding Feature Tracks → peak locations as rectangles
+Adding Loop Tracks    → peak-to-gene arcs
+Adding Gene Tracks    → gene model (exons, introns, strand)
+```
+
+This runs sequentially for all 9 genes, taking only ~0.45 minutes total.
+
+---
+
+#### Rendering and Saving
+
+```r
+# Render a single gene's track
+grid::grid.newpage()
+grid::grid.draw(p$CD14)
+
+# Save all 9 as a PDF
+plotPDF(plotList = p,
+    name = "Plot-Tracks-Marker-Genes-with-Peak2GeneLinks.pdf",
+    ArchRProj = projHeme5,
+    addDOC = FALSE, width = 5, height = 5)
+```
+
+The `p` object is a named list — you access individual genes with `p$CD14`, `p$TBX21`, etc. This is convenient for interactive inspection. `plotPDF()` iterates over all 9 and saves them as pages in a single PDF.
+
+#### What the CD14 browser track shows
+
+The CD14 track (shown in the documentation) is a good example of what to look for:
+
+```
+                    ████ CD14 gene
+                      ↑
+   Peak ─────────────arc──────── TSS   (high correlation arc)
+   Peak ──arc── TSS                    (shorter-range link)
+```
+
+- **Monocytes show high ATAC signal** at both the CD14 promoter and linked enhancer peaks
+- **Arcs connect distal peaks to the CD14 TSS** — these are the putative enhancers that ArchR has linked to CD14 expression
+- **Cell type specificity is visible** — the tracks for lymphoid cells are flat, matching the absence of CD14 expression in those lineages
+
+
+![alt text](image-60.png)
+---
+
+### 17.3.2 Plotting the Peak-to-Gene Heatmap
+
+This is one of the most powerful summary visualizations in ArchR, showing all peak-gene links simultaneously.
+
+```r
+p <- plotPeak2GeneHeatmap(ArchRProj = projHeme5, groupBy = "Clusters2")
+```
+
+The log shows the internal steps:
+
+```
+Determining KNN Groups      → re-aggregates cells into groups
+Ordering Peak2Gene Links    → sorts rows by pattern
+Constructing ATAC Heatmap   → left heatmap
+Constructing RNA Heatmap    → right heatmap
+```
+
+---
+
+#### Structure of the Heatmap
+
+The heatmap rows are clustered using k-means clustering based on the value passed to the parameter `k`, which defaults to 25.
+
+The output is a **side-by-side dual heatmap**:
+
+```
+┌─────────────────────────────────────────────┐
+│  ATAC Heatmap  │  RNA Heatmap               │
+│  (peak access) │  (gene expression)         │
+│                │                            │
+│  k=25 row      │  same row ordering         │
+│  clusters      │  as ATAC                   │
+│                │                            │
+│  Columns =     │  Columns =                 │
+│  cell clusters │  cell clusters             │
+└─────────────────────────────────────────────┘
+```
+
+- **Rows** = individual peak-gene link pairs (all of them, heavily downsampled for visualization)
+- **Columns** = cell clusters (Clusters2: B, CD4.M, CD8.CM, CLP, Erythroid, GMP, Mono, pDC, PreB, Progenitor)
+- **Left heatmap color** = peak accessibility (blue → yellow = low → high)
+- **Right heatmap color** = gene expression (blue → yellow = low → high)
+- **Row clusters (k=25)** = groups of peak-gene pairs with similar cell-type-specific patterns
+
+---
+
+#### What to Look for in the Heatmap
+
+The key insight from this visualization is **concordance between the two heatmaps**. For a good peak-to-gene link:
+
+```
+ATAC side          RNA side
+█████░░░░░    ←→   █████░░░░░   ✓ Concordant (Erythroid-specific)
+░░░████░░░    ←→   ░░░████░░░   ✓ Concordant (Myeloid-specific)
+█████░░░░░    ←→   ░░░░░█████   ✗ Discordant (suspicious link)
+```
+
+When you see a row cluster where the ATAC pattern on the left mirrors the RNA pattern on the right, that represents a group of enhancer-gene pairs that are co-regulated in specific cell types — these are your highest-confidence putative regulatory elements.
+
+#### The k=25 clusters biologically represent
+
+Each of the 25 row clusters should loosely correspond to a regulatory program. For example in the hematopoietic system you'd expect to find clusters enriched in:
+
+- Erythroid-specific peaks linked to erythroid genes (GATA1, HBB, etc.)
+- Myeloid-specific peaks linked to myeloid genes (CD14, CSF1R, etc.)
+- B cell-specific peaks linked to B cell genes (PAX5, MS4A1, etc.)
+- T cell-specific peaks linked to T cell genes (CD3D, TBX21, etc.)
+- Progenitor/shared peaks linked to broadly expressed genes
+
+---
+
+#### Practical Tips for Interpreting the Heatmap
+
+**Increasing k** — using a higher k (e.g. `k=50`) gives finer resolution of regulatory modules but makes the plot harder to read. Use higher k when you want to distinguish closely related cell types.
+
+**Discordant rows** — some rows will show high ATAC signal but low RNA signal (or vice versa). These could represent: poised enhancers (open but not yet active), post-transcriptional regulation, or false positive links that passed the 0.45 correlation cutoff by chance.
+
+**Column ordering** — columns are ordered by cell type identity, so you can visually trace which clusters share regulatory programs. Notice whether lymphoid clusters (B, PreB, CLP) group together vs. myeloid (Mono, GMP).
+
+---
+
+### Chapter Summary
+
+The full Peak2Gene workflow in one view:
+
+```
+addPeak2GeneLinks()
+        ↓
+  492 KNN pseudo-bulk groupings
+  (scATAC + scRNA jointly)
+        ↓
+  Pearson correlations across all
+  peak-gene pairs within ±X kb
+        ↓
+getPeak2GeneLinks(corCutOff=0.45)
+        ↓
+     36,002 links
+        ↓
+  ┌─────────────────────┐
+  │  plotBrowserTrack() │ → per-gene arcs over cell-type tracks
+  └─────────────────────┘
+  ┌──────────────────────────┐
+  │ plotPeak2GeneHeatmap()   │ → global view of all regulatory modules
+  └──────────────────────────┘
+```
+
+> The core value of Peak2Gene over co-accessibility is the RNA validation layer — a peak-gene correlation is far stronger evidence for a regulatory relationship than a peak-peak correlation alone, because it directly connects chromatin state to transcriptional output across the diversity of cell types in your dataset.
+
