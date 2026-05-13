@@ -5258,3 +5258,4 @@ correlateMatrices()
 ```
 
 > The key conceptual advance of this chapter over chromVAR alone is the **requirement for concordance between chromatin and expression**. A TF motif that becomes accessible in a cell type but whose gene is not expressed there is unlikely to be the driver — it could be a passenger effect, a related family member, or indirect remodeling. By demanding that the TF's own activity (gene score or RNA) tracks with its motif accessibility, ArchR identifies the most likely causal regulators of cell-type-specific chromatin states.
+>
