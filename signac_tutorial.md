@@ -1261,3 +1261,158 @@ This metric demonstrates why label transferring requires careful manual validati
 
 -----
 
+
+
+### Ready CSV of top 10 MS4A1 and LYZ links — explanation and exact R code
+
+Below is a short explanation of what the CSV will contain, followed by **copy‑paste R code** that (1) extracts the peak–gene links from your Seurat/Signac object, (2) computes **distance to the gene TSS** (with a safe fallback if gene annotations are not embedded), (3) computes **BH‑adjusted p‑values (padj)**, (4) selects the **top 10 links** for **MS4A1** and **LYZ** (ranked by padj then zscore), and (5) writes two CSV files:
+
+- **`top10_MS4A1_links.csv`**  
+- **`top10_LYZ_links.csv`**
+
+**What each CSV column will contain**
+- **peak** — peak name (e.g., `chr11-60455290-60456088`)  
+- **seqnames, start, end, width** — genomic coordinates of the peak  
+- **gene** — target gene (MS4A1 or LYZ)  
+- **zscore** — link z‑score (strength of association)  
+- **pvalue** — raw p‑value from the link test  
+- **padj** — BH‑adjusted p‑value (multiple testing corrected)  
+- **distance_to_TSS** — absolute distance in bp from the peak center to the gene TSS (0 if overlapping)  
+- **score** (if present) — link score or ranking metric from Signac (kept if available)
+
+**Two short lines from your coverage PDF confirming plotting scales:**  
+“MS4A1 — Normalized signal (range 0 - 40)”  
+“LYZ — Normalized signal (range 0 - 16)”
+
+---
+
+#### R code — generate CSVs of top 10 links for MS4A1 and LYZ
+```r
+# Required packages
+library(Signac)
+library(Seurat)
+library(GenomicRanges)
+library(dplyr)
+
+# 1) Extract links table (Signac Links accessor)
+links_obj <- tryCatch({
+  Links(pbmc)                # preferred accessor
+}, error = function(e) {
+  # fallback: some Signac versions store links in assay slot
+  if (!is.null(pbmc[["ATAC"]]@links)) {
+    as.data.frame(pbmc[["ATAC"]]@links)
+  } else stop("No Links found in object. Ensure LinkPeaks was run and Links(pbmc) is available.")
+})
+
+# If Links(pbmc) returned a GRanges, convert to data.frame
+links_df <- if (inherits(links_obj, "GRanges")) {
+  as.data.frame(links_obj)
+} else {
+  as.data.frame(links_obj)
+}
+
+# Standardize column names if necessary
+# Expect columns: seqnames, start, end, width, strand, score, gene, peak, zscore, pvalue
+# If peak is not present, create it from seqnames/start/end
+if (!"peak" %in% colnames(links_df)) {
+  links_df$peak <- paste0(links_df$seqnames, "-", links_df$start, "-", links_df$end)
+}
+
+# 2) Compute distance to TSS for each linked gene
+# Try to obtain gene TSS from object annotation; fallback to EnsDb if not present
+get_gene_tss <- function(gene_names) {
+  # Attempt 1: Annotation stored in pbmc (Signac/Seurat)
+  if (!is.null(pbmc@misc$annotation) && inherits(pbmc@misc$annotation, "GRanges")) {
+    ann <- pbmc@misc$annotation
+    ann_df <- as.data.frame(ann)
+    tss_df <- ann_df %>%
+      filter(gene_name %in% gene_names) %>%
+      mutate(TSS = ifelse(strand == "+", start, end)) %>%
+      select(gene_name, seqnames, TSS)
+    return(tss_df)
+  }
+  # Attempt 2: try Annotation(pbmc) if present
+  if (!is.null(Annotation(pbmc))) {
+    ann <- Annotation(pbmc)
+    if (inherits(ann, "GRanges")) {
+      ann_df <- as.data.frame(ann)
+      if ("gene_name" %in% colnames(ann_df)) {
+        tss_df <- ann_df %>%
+          filter(gene_name %in% gene_names) %>%
+          mutate(TSS = ifelse(strand == "+", start, end)) %>%
+          select(gene_name, seqnames, TSS)
+        return(tss_df)
+      }
+    }
+  }
+  # Attempt 3: use EnsDb.Hsapiens.v86 if available
+  if (requireNamespace("EnsDb.Hsapiens.v86", quietly = TRUE)) {
+    edb <- EnsDb.Hsapiens.v86::EnsDb.Hsapiens.v86
+    tx <- GenomicFeatures::genes(edb, filter = AnnotationFilter::GeneNameFilter(gene_names))
+    tx_df <- as.data.frame(tx)
+    tss_df <- tx_df %>%
+      group_by(gene_name) %>%
+      summarize(seqnames = seqnames[1],
+                TSS = ifelse(strand[1] == "+", min(start), max(end))) %>%
+      ungroup()
+    return(as.data.frame(tss_df))
+  }
+  # If none available, return NA table
+  data.frame(gene_name = gene_names, seqnames = NA, TSS = NA, stringsAsFactors = FALSE)
+}
+
+# Genes of interest
+genes_of_interest <- c("MS4A1", "LYZ")
+tss_table <- get_gene_tss(genes_of_interest)
+
+# 3) Compute peak center and distance to TSS
+links_df <- links_df %>%
+  mutate(peak_center = round((start + end) / 2))
+
+# join TSS info
+links_df <- links_df %>%
+  left_join(tss_table, by = c("gene" = "gene_name"))
+
+# compute distance (NA if TSS unknown)
+links_df <- links_df %>%
+  mutate(distance_to_TSS = ifelse(!is.na(TSS), abs(peak_center - TSS), NA_integer_))
+
+# 4) compute BH-adjusted p-values (padj) across all tested links
+if ("pvalue" %in% colnames(links_df)) {
+  links_df$padj <- p.adjust(links_df$pvalue, method = "BH")
+} else {
+  links_df$padj <- NA_real_
+}
+
+# 5) Select top 10 links for each gene (rank by padj then zscore)
+get_top_links <- function(gene_name, n = 10) {
+  df <- links_df %>%
+    filter(gene == gene_name) %>%
+    arrange(padj, desc(zscore)) %>%
+    select(seqnames, start, end, width, strand, score, gene, peak, zscore, pvalue, padj, distance_to_TSS)
+  head(df, n)
+}
+
+top10_MS4A1 <- get_top_links("MS4A1", 10)
+top10_LYZ   <- get_top_links("LYZ", 10)
+
+# 6) Write CSVs
+write.csv(top10_MS4A1, file = "top10_MS4A1_links.csv", row.names = FALSE)
+write.csv(top10_LYZ,   file = "top10_LYZ_links.csv",   row.names = FALSE)
+
+# 7) Print brief summary to console
+cat("Wrote top10_MS4A1_links.csv and top10_LYZ_links.csv\n")
+cat("MS4A1: ", nrow(top10_MS4A1), "rows; LYZ: ", nrow(top10_LYZ), "rows\n")
+```
+
+---
+
+### Recommended thresholds and notes for the CSV
+- **Prioritize peaks with `padj <= 0.05`** and **zscore ≥ 2** as initial high‑confidence candidates.  
+- If `distance_to_TSS` is **< 2000 bp**, treat as **promoter‑proximal**; otherwise label as **distal enhancer candidate**.  
+- If `TSS` could not be resolved (NA), add gene annotation to your object (or install `EnsDb.Hsapiens.v86`) and re‑run the script to get accurate distances.  
+- The CSVs are ready to include in a supplement or to join with motif/co‑accessibility results.
+
+---
+
+If you want, I will now **(2)** produce the exact code and file layout to generate **annotated, publication‑ready PDFs** for the top peaks (coverage + scatter + a small peak table) and combine them into a single multi‑page PDF. Do you want the PDFs to include **peak IDs and padj annotated on the coverage track** and **one scatter per peak** (yes/no)?
